@@ -28,7 +28,6 @@ window.UFOVProgress = (() => {
         ? window.crypto.randomUUID()
         : String(Date.now() + Math.random()),
       date: Date.now(),
-      game: "UFOV",
       mode: record.mode,
       modeName: record.modeName,
       trials: record.trials,
@@ -39,7 +38,8 @@ window.UFOVProgress = (() => {
       peripheralAccuracy: record.peripheralAccuracy,
       correctCount: record.correctCount,
       wrongCount: record.wrongCount,
-      action: record.action
+      action: record.action,
+      settings: record.settings || null
     });
 
     saveHistory(history);
@@ -66,8 +66,8 @@ window.UFOVProgress = (() => {
               <thead>
                 <tr>
                   <th>Date</th>
-                  <th>Game</th>
                   <th>Mode</th>
+                  <th>Settings</th>
                   <th>Trials</th>
                   <th>Flash</th>
                   <th>Accuracy</th>
@@ -86,8 +86,9 @@ window.UFOVProgress = (() => {
               <canvas id="progressCanvas" width="1280" height="560"></canvas>
             </div>
             <div class="chart-legend">
-              <span><i class="legend-line flash"></i> Flash difficulty</span>
-              <span><i class="legend-line accuracy"></i> Check accuracy</span>
+              <span><i class="legend-line flash"></i> Difficulty from flash</span>
+              <span><i class="legend-line accuracy"></i> Accuracy</span>
+              <span><i class="legend-line target"></i> Target / regress lines</span>
             </div>
           </div>
         </div>
@@ -178,10 +179,10 @@ window.UFOVProgress = (() => {
       return `
         <tr>
           <td>${formatRelativeDate(row.date)}</td>
-          <td>${row.game}</td>
           <td>${escapeHtml(row.modeName || `Mode ${row.mode}`)}</td>
+          <td>${escapeHtml(formatSettings(row))}</td>
           <td>${row.correctCount}/${row.trials}</td>
-          <td>${Math.round(row.flashBefore)}ms → ${Math.round(row.flashAfter)}ms</td>
+          <td>${Math.round(row.flashBefore) === Math.round(row.flashAfter) ? `${Math.round(row.flashAfter)}ms` : `${Math.round(row.flashBefore)}ms → ${Math.round(row.flashAfter)}ms`}</td>
           <td><span class="badge-score ${scoreClass(row.accuracy)}">${Math.round(row.accuracy)}%</span></td>
           <td><span class="badge-score ${scoreClass(row.centerAccuracy)}">${Math.round(row.centerAccuracy)}%</span></td>
           <td><span class="badge-score ${scoreClass(row.peripheralAccuracy)}">${formatPeripheral(row)}</span></td>
@@ -199,66 +200,61 @@ window.UFOVProgress = (() => {
     const ctx = canvas.getContext("2d");
     const width = canvas.width;
     const height = canvas.height;
+    const chartState = getChartData(history);
+    const data = chartState.rows;
 
     ctx.clearRect(0, 0, width, height);
+    ctx.imageSmoothingEnabled = true;
 
     ctx.fillStyle = "#050505";
     ctx.fillRect(0, 0, width, height);
 
-    const data = history.slice(-80);
-
     if (summary) {
-      summary.innerHTML = renderSummary(data);
+      summary.innerHTML = renderSummary(data, chartState.scope, chartState.current);
     }
 
     if (data.length < 2) {
-      drawCenteredText(ctx, "Complete at least 2 progress checks to show a chart.", width, height);
+      drawCenteredText(ctx, "Complete at least 2 matching progress checks to show a chart.", width, height);
       return;
     }
 
     const padding = {
-      left: 105,
-      right: 105,
-      top: 58,
+      left: 90,
+      right: 90,
+      top: 62,
       bottom: 78
     };
 
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
 
-    const flashValues = data.map(d => Number(d.flashAfter) || 0);
-    const minFlash = Math.max(0, Math.min(...flashValues) - 20);
-    const maxFlash = Math.max(...flashValues) + 20;
-
     drawGrid(ctx, padding, chartWidth, chartHeight);
-    drawAxisLabels(ctx, padding, chartWidth, chartHeight, minFlash, maxFlash);
+    drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight);
+    drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.targetAccuracy, "#fbbf24", "target");
+    drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.regressAccuracy, "#fb7185", "regress");
 
-    const flashPoints = data.map((row, index) => {
+    const difficultyPoints = data.map((row, index) => {
       const x = padding.left + (index / (data.length - 1)) * chartWidth;
-      const normalized = (row.flashAfter - minFlash) / Math.max(1, maxFlash - minFlash);
+      const normalized = difficultyScore(row, chartState.current) / 100;
       const y = padding.top + chartHeight - normalized * chartHeight;
       return { x, y };
     });
 
     const accuracyPoints = data.map((row, index) => {
       const x = padding.left + (index / (data.length - 1)) * chartWidth;
-      const normalized = (Number(row.accuracy) || 0) / 100;
+      const normalized = clamp((Number(row.accuracy) || 0) / 100, 0, 1);
       const y = padding.top + chartHeight - normalized * chartHeight;
       return { x, y };
     });
 
-    drawLine(ctx, flashPoints, "#8b5cf6", 4);
+    drawLine(ctx, difficultyPoints, "#8b5cf6", 4);
     drawLine(ctx, accuracyPoints, "#22c55e", 4);
-    drawDots(ctx, flashPoints, "#8b5cf6");
+    drawDots(ctx, difficultyPoints, "#8b5cf6");
     drawDots(ctx, accuracyPoints, "#22c55e");
 
     ctx.fillStyle = "#d6d3d1";
     ctx.font = "800 18px Inter, system-ui, sans-serif";
-    ctx.fillText("Flash ms", padding.left, 30);
-
-    ctx.textAlign = "right";
-    ctx.fillText("Accuracy %", width - padding.right, 30);
-    ctx.textAlign = "left";
+    ctx.fillText("Higher is better: faster flash difficulty and accuracy", padding.left, 34);
 
     ctx.fillStyle = "#8f8f8f";
     ctx.font = "700 15px Inter, system-ui, sans-serif";
@@ -269,31 +265,131 @@ window.UFOVProgress = (() => {
     ctx.textAlign = "left";
   }
 
-  function renderSummary(data) {
+  function getChartData(history) {
+    const current = readCurrentSettings();
+    const exact = history.filter((row) => recordMatchesCurrent(row, current));
+
+    if (exact.length >= 2) {
+      return {
+        rows: exact.slice(-80),
+        scope: "current settings",
+        current
+      };
+    }
+
+    const sameMode = history.filter((row) => Number(row.mode) === current.mode);
+
+    return {
+      rows: sameMode.slice(-80),
+      scope: exact.length === 1 ? "same mode, waiting for one more exact check" : "same mode",
+      current
+    };
+  }
+
+  function readCurrentSettings() {
+    const numberValue = (id, fallback) => {
+      const input = document.getElementById(id);
+      const value = Number(input ? input.value : fallback);
+      return Number.isFinite(value) ? value : fallback;
+    };
+
+    const textValue = (id, fallback) => {
+      const input = document.getElementById(id);
+      return input ? input.value : fallback;
+    };
+
+    const levelSelect = document.getElementById("levelSelect");
+    const mode = numberValue("levelSelect", 3);
+
+    return {
+      mode,
+      modeName: levelSelect && levelSelect.selectedOptions && levelSelect.selectedOptions[0]
+        ? levelSelect.selectedOptions[0].textContent
+        : `Mode ${mode}`,
+      responseStyle: textValue("responseStyleSelect", "twoStep"),
+      stimulusArea: textValue("stimulusAreaSelect", "circle"),
+      directionCount: numberValue("directionCountInput", 8),
+      peripheralTargets: numberValue("peripheralTargetInput", 1),
+      distractors: numberValue("distractorInput", 14),
+      trialsToCheck: numberValue("trialsToCheckInput", 4),
+      targetAccuracy: numberValue("targetAccuracyInput", 75),
+      regressAccuracy: numberValue("regressAccuracyInput", 50),
+      minDuration: numberValue("minDurationInput", 16),
+      maxDuration: numberValue("maxDurationInput", 500)
+    };
+  }
+
+  function recordMatchesCurrent(row, current) {
+    if (!row.settings) return false;
+
+    const settings = row.settings;
+    const sameDistractors = current.mode === 3
+      ? Number(settings.distractors) === current.distractors
+      : true;
+
+    return Number(row.mode) === current.mode
+      && settings.responseStyle === current.responseStyle
+      && settings.stimulusArea === current.stimulusArea
+      && Number(settings.directionCount) === current.directionCount
+      && Number(settings.peripheralTargets) === current.peripheralTargets
+      && sameDistractors;
+  }
+
+  function difficultyScore(row, current) {
+    const settings = row.settings || current;
+    const min = Number(settings.minDuration) || current.minDuration || 16;
+    const max = Math.max(Number(settings.maxDuration) || current.maxDuration || 500, min + 1);
+    const flash = Number(row.flashAfter) || max;
+
+    return clamp(((max - flash) / (max - min)) * 100, 0, 100);
+  }
+
+  function renderSummary(data, scope, current) {
     if (!data.length) {
       return `
         <div><strong>Checks</strong><span>0</span></div>
+        <div><strong>Scope</strong><span>${escapeHtml(scope)}</span></div>
         <div><strong>Latest flash</strong><span>—</span></div>
-        <div><strong>Latest accuracy</strong><span>—</span></div>
         <div><strong>Trend</strong><span>—</span></div>
       `;
     }
 
     const latest = data[data.length - 1];
     const first = data[0];
+    const difficultyDelta = difficultyScore(latest, current) - difficultyScore(first, current);
 
-    const flashDelta = latest.flashAfter - first.flashAfter;
     const trend =
-      flashDelta < 0 ? "Getting harder" :
-      flashDelta > 0 ? "Getting easier" :
+      difficultyDelta > 3 ? "Harder" :
+      difficultyDelta < -3 ? "Easier" :
       "Stable";
 
     return `
       <div><strong>Checks</strong><span>${data.length}</span></div>
-      <div><strong>Latest flash</strong><span>${Math.round(latest.flashAfter)}ms</span></div>
-      <div><strong>Latest accuracy</strong><span>${Math.round(latest.accuracy)}%</span></div>
+      <div><strong>Scope</strong><span>${escapeHtml(scope)}</span></div>
+      <div><strong>Latest</strong><span>${Math.round(latest.flashAfter)}ms · ${Math.round(latest.accuracy)}%</span></div>
       <div><strong>Trend</strong><span>${trend}</span></div>
     `;
+  }
+
+  function formatSettings(row) {
+    const settings = row.settings;
+
+    if (!settings) {
+      return "older record";
+    }
+
+    const parts = [
+      settings.responseStyle === "combined" ? "combined" : "two step",
+      settings.stimulusArea === "full" ? "full field" : "circle",
+      `${settings.directionCount} dirs`,
+      `${settings.peripheralTargets} target${Number(settings.peripheralTargets) === 1 ? "" : "s"}`
+    ];
+
+    if (Number(row.mode) === 3) {
+      parts.push(`${settings.distractors} distractors`);
+    }
+
+    return parts.join(" · ");
   }
 
   function drawGrid(ctx, padding, chartWidth, chartHeight) {
@@ -317,23 +413,42 @@ window.UFOVProgress = (() => {
     ctx.stroke();
   }
 
-  function drawAxisLabels(ctx, padding, chartWidth, chartHeight, minFlash, maxFlash) {
+  function drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight) {
     ctx.font = "700 15px Inter, system-ui, sans-serif";
     ctx.fillStyle = "#a8a29e";
+    ctx.textAlign = "right";
 
     for (let i = 0; i <= 4; i += 1) {
       const y = padding.top + (chartHeight / 4) * i;
-
-      const flashValue = maxFlash - ((maxFlash - minFlash) / 4) * i;
-      ctx.textAlign = "right";
-      ctx.fillText(`${Math.round(flashValue)}ms`, padding.left - 14, y + 5);
-
-      const accuracyValue = 100 - 25 * i;
-      ctx.textAlign = "left";
-      ctx.fillText(`${accuracyValue}%`, padding.left + chartWidth + 14, y + 5);
+      const value = 100 - 25 * i;
+      ctx.fillText(`${value}%`, padding.left - 14, y + 5);
     }
 
     ctx.textAlign = "left";
+    ctx.fillText("0–100 scale", padding.left, padding.top + chartHeight + 34);
+  }
+
+  function drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, value, color, label) {
+    const normalized = clamp(Number(value) / 100, 0, 1);
+    const y = padding.top + chartHeight - normalized * chartHeight;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 8]);
+
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(padding.left + chartWidth, y);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.fillStyle = color;
+    ctx.font = "800 13px Inter, system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(`${label} ${Math.round(value)}%`, padding.left + chartWidth - 8, y - 8);
+    ctx.textAlign = "left";
+    ctx.restore();
   }
 
   function drawLine(ctx, points, color, width) {
@@ -349,7 +464,11 @@ window.UFOVProgress = (() => {
     ctx.moveTo(points[0].x, points[0].y);
 
     for (let i = 1; i < points.length; i += 1) {
-      ctx.lineTo(points[i].x, points[i].y);
+      const previous = points[i - 1];
+      const current = points[i];
+      const midX = (previous.x + current.x) / 2;
+
+      ctx.bezierCurveTo(midX, previous.y, midX, current.y, current.x, current.y);
     }
 
     ctx.stroke();
@@ -407,6 +526,10 @@ window.UFOVProgress = (() => {
     if (minutes < 60) return `${minutes}m ago`;
     if (hours < 24) return `${hours}h ago`;
     return `${days}d ago`;
+  }
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
   }
 
   function escapeHtml(value) {

@@ -14,7 +14,6 @@
     <main class="trainer-app">
       <section class="stage" id="stage" aria-live="polite">
         <div class="direction-preview" id="directionPreview">North-East</div>
-        <div class="direction-ray" id="directionRay"></div>
         <div class="sector-overlay" id="sectorOverlay">
           <div class="sector-highlight" id="sectorHighlight"></div>
         </div>
@@ -57,14 +56,6 @@
         </div>
 
         <div class="session-stats">
-          <div>
-            <span>Status</span>
-            <strong id="runStatus">Idle</strong>
-          </div>
-          <div>
-            <span>Mode</span>
-            <strong id="levelTitle">Mode · Identification</strong>
-          </div>
           <div class="stats-strip">
             <div><span>Flash</span><strong id="durationStat">500ms</strong></div>
             <div><span>Accuracy</span><strong id="accuracyStat">0%</strong></div>
@@ -78,6 +69,11 @@
         </div>
 
         <div class="settings-grid">
+          <label class="wide">
+            Peripheral range
+            <input type="range" id="rangeSlider" min="36" max="98" value="78" />
+          </label>
+
           <label>
             Mode
             <select id="levelSelect">
@@ -85,6 +81,32 @@
               <option value="2">Divided attention</option>
               <option value="3" selected>Selective attention</option>
             </select>
+          </label>
+
+          <label>
+            Response style
+            <select id="responseStyleSelect">
+              <option value="twoStep">Two step</option>
+              <option value="combined">Combined choices</option>
+            </select>
+          </label>
+
+          <label id="choiceCountLabel" class="hidden">
+            Choice count
+            <input type="number" id="choiceCountInput" min="2" max="10" value="10" />
+          </label>
+
+          <label>
+            Stimulus area
+            <select id="stimulusAreaSelect">
+              <option value="circle">Circle</option>
+              <option value="full">Full screen</option>
+            </select>
+          </label>
+
+          <label>
+            Direction count
+            <input type="number" id="directionCountInput" min="4" max="16" value="8" />
           </label>
 
           <label class="toggle-row">
@@ -132,6 +154,16 @@
             <input type="number" id="maskInput" min="0" max="500" value="90" />
           </label>
 
+          <label class="toggle-row">
+            <input type="checkbox" id="symbolMaskInput" checked />
+            Symbol mask
+          </label>
+
+          <label>
+            Mask density
+            <input type="number" id="maskDensityInput" min="20" max="400" value="140" />
+          </label>
+
           <label>
             Correct delay ms
             <input type="number" id="correctDelayInput" min="0" max="2000" value="650" />
@@ -143,8 +175,33 @@
           </label>
 
           <label>
+            Target symbol
+            <input type="text" id="targetSymbolInput" value="✕" maxlength="4" />
+          </label>
+
+          <label>
+            Distractor symbol
+            <input type="text" id="distractorSymbolInput" value="Y" maxlength="4" />
+          </label>
+
+          <label class="toggle-row">
+            <input type="checkbox" id="blurLettersInput" />
+            Blur letters
+          </label>
+
+          <label>
+            Letter blur px
+            <input type="number" id="letterBlurInput" min="0" max="12" value="2.5" step="0.5" />
+          </label>
+
+          <label class="toggle-row">
+            <input type="checkbox" id="hotkeysInput" checked />
+            Hotkeys
+          </label>
+
+          <label>
             Peripheral targets
-            <input type="number" id="peripheralTargetInput" min="1" max="5" value="1" />
+            <input type="number" id="peripheralTargetInput" min="1" max="8" value="1" />
           </label>
 
           <label>
@@ -152,12 +209,7 @@
             <input type="number" id="distractorInput" min="0" max="47" value="18" />
           </label>
 
-          <label>
-            Peripheral range
-            <input type="range" id="rangeSlider" min="36" max="98" value="78" />
-          </label>
-
-          <button type="button" id="resetSettingsButton" class="reset-settings-btn">Reset settings</button>
+          <button type="button" id="resetSettingsButton" class="reset-settings-btn wide">Reset settings</button>
 
         </div>
       </aside>
