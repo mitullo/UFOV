@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UFOV</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="trainer-app">
+      <section class="stage" id="stage" aria-live="polite">
+        <div class="direction-preview" id="directionPreview">North-East</div>
+        <div class="direction-ray" id="directionRay"></div>
+        <div class="sector-overlay" id="sectorOverlay">
+          <div class="sector-highlight" id="sectorHighlight"></div>
+        </div>
+        <div class="fixation" id="fixation">+</div>
+        <div class="stimulus center-stimulus" id="centerStimulus"></div>
+        <div class="noise-mask" id="noiseMask"></div>
+      </section>
+
+      <div class="floating-controls">
+        <button class="icon-button hidden" id="pauseButton">Pause</button>
+        <button class="icon-button" id="progressButton">Graph</button>
+        <button class="icon-button" id="settingsButton">Settings</button>
+      </div>
+
+      <section class="start-overlay" id="startOverlay">
+        <div class="start-card">
+          <h1>UFOV</h1>
+          <p>Test your Useful Field of View.</p>
+          <ol>
+            <li>Identify the center emoji.</li>
+            <li>Locate the odd peripheral target.</li>
+          </ol>
+          <p class="fullscreen-tip">Press <strong>F11</strong> for fullscreen to get the best training experience.</p>
+          <button class="start-button" id="startButton">Start</button>
+        </div>
+      </section>
+
+      <section class="response-overlay" id="responseOverlay">
+        <div class="prompt-block">
+          <span id="promptText">Press start.</span>
+          <strong id="feedbackText"></strong>
+        </div>
+        <div class="choice-row" id="choiceRow"></div>
+      </section>
+
+      <aside class="settings-panel" id="settingsPanel">
+        <div class="settings-header">
+          <h2>Settings</h2>
+          <button class="secondary-button" id="closeSettingsButton">Close</button>
+        </div>
+
+        <div class="session-stats">
+          <div>
+            <span>Status</span>
+            <strong id="runStatus">Idle</strong>
+          </div>
+          <div>
+            <span>Mode</span>
+            <strong id="levelTitle">Mode · Identification</strong>
+          </div>
+          <div class="stats-strip">
+            <div><span>Flash</span><strong id="durationStat">500ms</strong></div>
+            <div><span>Accuracy</span><strong id="accuracyStat">0%</strong></div>
+            <div><span>Trial</span><strong id="trialStat">0</strong></div>
+            <div><span>Refresh</span><strong id="refreshStat">--Hz</strong></div>
+          </div>
+          <div class="drawer-actions">
+            <button class="primary-button" id="calibrateButton">Calibrate</button>
+            <button class="secondary-button" id="resetButton">Reset</button>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <label>
+            Mode
+            <select id="levelSelect">
+              <option value="1">Identification</option>
+              <option value="2">Divided attention</option>
+              <option value="3" selected>Selective attention</option>
+            </select>
+          </label>
+
+          <label class="toggle-row">
+            <input type="checkbox" id="autoProgressInput" checked />
+            Auto progress
+          </label>
+
+          <label>
+            Trials to check
+            <input type="number" id="trialsToCheckInput" min="1" max="40" value="4" />
+          </label>
+
+          <label>
+            Target accuracy %
+            <input type="number" id="targetAccuracyInput" min="50" max="98" value="80" />
+          </label>
+
+          <label>
+            Regress accuracy %
+            <input type="number" id="regressAccuracyInput" min="10" max="80" value="50" />
+          </label>
+
+          <label>
+            Start flash ms
+            <input type="number" id="startDurationInput" min="16" max="1000" value="500" />
+          </label>
+
+          <label>
+            Minimum flash ms
+            <input type="number" id="minDurationInput" min="4" max="100" value="16" />
+          </label>
+
+          <label>
+            Maximum flash ms
+            <input type="number" id="maxDurationInput" min="50" max="1500" value="500" />
+          </label>
+
+          <label>
+            Fixation ms
+            <input type="number" id="fixationInput" min="0" max="1500" value="1200" />
+          </label>
+
+          <label>
+            Mask ms
+            <input type="number" id="maskInput" min="0" max="500" value="90" />
+          </label>
+
+          <label>
+            Correct delay ms
+            <input type="number" id="correctDelayInput" min="0" max="2000" value="650" />
+          </label>
+
+          <label>
+            Miss delay ms
+            <input type="number" id="missDelayInput" min="0" max="3000" value="1000" />
+          </label>
+
+          <label>
+            Peripheral targets
+            <input type="number" id="peripheralTargetInput" min="1" max="5" value="1" />
+          </label>
+
+          <label>
+            Distractors
+            <input type="number" id="distractorInput" min="0" max="47" value="18" />
+          </label>
+
+          <label>
+            Peripheral range
+            <input type="range" id="rangeSlider" min="36" max="98" value="78" />
+          </label>
+
+          <button type="button" id="resetSettingsButton" class="reset-settings-btn">Reset settings</button>
+
+        </div>
+      </aside>
+    </main>
+
+    <script src="progress.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
