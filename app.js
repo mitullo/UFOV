@@ -137,9 +137,10 @@ function clamp(value, min, max) {
 function loadSavedFlashDuration(settings) {
   try {
     const raw = localStorage.getItem(FLASH_DURATION_KEY);
+    if (raw === null) return settings.startDuration;
     const saved = Number(raw);
 
-    if (!Number.isFinite(saved)) {
+    if (!Number.isFinite(saved) || saved <= 0) {
       return settings.startDuration;
     }
 
