@@ -114,7 +114,7 @@ function getSettings() {
     startDuration: clamp(readNumber(startDurationInput, 500, 16, 1000), minimum, maximum),
     minDuration: minimum,
     maxDuration: maximum,
-    fixationMs: readNumber(fixationInput, 1200, 0, 1500),
+    fixationMs: readNumber(fixationInput, 800, 0, 1500),
     maskMs: readNumber(maskInput, 90, 0, 500),
     symbolMask: symbolMaskInput ? symbolMaskInput.checked : false,
     maskDensity: readNumber(maskDensityInput, 140, 20, 400),
@@ -565,9 +565,11 @@ function presentResponseControls() {
     presentCombinedChoices();
     return;
   }
+  responseOverlay.classList.remove("combined-mode");
+  choiceRow.classList.remove("combined");
   responseLock = false;
   responseOverlay.classList.add("visible");
-  promptText.className = "";
+  responseOverlay.classList.remove("feedback-mode", "peripheral-chooser");
   promptText.textContent = "Which emoji was in the center?";
   choiceRow.innerHTML = "";
   const choices = shuffle([state.current.center, state.current.decoy]);
@@ -595,6 +597,8 @@ function presentCombinedChoices() {
   responseLock = false;
   responseOverlay.classList.add("visible");
   responseOverlay.classList.remove("peripheral-chooser");
+  responseOverlay.classList.add("combined-mode");
+  choiceRow.classList.add("combined");
   promptText.className = "";
   promptText.textContent = "Pick the emoji and location.";
   feedbackText.textContent = "Use number keys for fast reps.";
@@ -639,8 +643,15 @@ function buildCombinedChoices() {
     const center = Math.random() < 0.55 ? randomItem([state.current.center, state.current.decoy]) : randomItem(emojiPool);
     addChoice(center, randomDirectionSet(targetCount, Math.random() < 0.35 ? correctDirections : []));
   }
-  const wrong = shuffle(choices.slice(1)).slice(0, count - 1);
-  return shuffle([correctChoice, ...wrong]);
+  const wrong = choices.slice(1).slice(0, count - 1);
+  const all = [correctChoice, ...wrong];
+  all.sort((a, b) => {
+    const dirA = a.directions[0] ? a.directions[0].index : 0;
+    const dirB = b.directions[0] ? b.directions[0].index : 0;
+    if (dirA !== dirB) return dirA - dirB;
+    return (a.center || "").localeCompare(b.center || "");
+  });
+  return all;
 }
 
 function randomDirectionSet(count, avoid = []) {
@@ -693,6 +704,8 @@ function presentPeripheralChooser() {
   state.awaitingPeripheral = true;
   state.response.peripherals = [];
   responseLock = true;
+  responseOverlay.classList.remove("combined-mode");
+  choiceRow.classList.remove("combined");
   choiceRow.innerHTML = "";
   responseOverlay.classList.remove("visible");
   responseOverlay.classList.add("peripheral-chooser");
@@ -899,7 +912,7 @@ function finishTrial() {
   const progressResult = applyProgressionIfNeeded();
   if (progressResult && window.UFOVProgress) window.UFOVProgress.recordCheck(progressResult);
   updateStats();
-  const feedbackDelay = Math.max(1000, correct ? getSettings().correctDelayMs : getSettings().missDelayMs);
+  const feedbackDelay = correct ? getSettings().correctDelayMs : getSettings().missDelayMs;
   scheduleTrial(feedbackDelay, sessionToken);
 }
 
@@ -911,6 +924,8 @@ function isPeripheralResponseCorrect() {
 }
 
 function showFeedback(correct, centerCorrect, peripheralCorrect) {
+  responseOverlay.classList.remove("combined-mode");
+  choiceRow.classList.remove("combined");
   responseOverlay.classList.add("visible", "feedback-mode");
   promptText.innerHTML = correct ? "Correct" : "Incorrect";
   promptText.className = correct ? "feedback-title correct" : "feedback-title incorrect";
@@ -1298,7 +1313,7 @@ resetSettingsButton.addEventListener("click", () => {
     startDurationInput: "500",
     minDurationInput: "16",
     maxDurationInput: "500",
-    fixationInput: "1200",
+    fixationInput: "800",
     maskInput: "90",
     symbolMaskInput: true,
     maskDensityInput: "140",

@@ -149,6 +149,27 @@ h1 {
   gap: 12px;
 }
 
+.choice-row.combined {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(170px, 1fr));
+  gap: 14px;
+  justify-content: center;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+}
+
+@media (max-width: 1080px) {
+  .choice-row.combined {
+    grid-template-columns: repeat(4, minmax(170px, 1fr));
+  }
+}
+
+@media (max-width: 860px) {
+  .choice-row.combined {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+}
+
 .primary-button,
 .secondary-button {
   min-height: 48px;
@@ -1091,6 +1112,10 @@ h1 {
   backdrop-filter: none;
 }
 
+.response-overlay.combined-mode {
+  width: min(1180px, calc(100vw - 32px));
+}
+
 .response-overlay.peripheral-chooser {
   top: calc(50% - var(--peripheral-diameter, min(92vmin, 940px)) / 2 - 48px);
   transform: translate(-50%, 0);
@@ -1479,10 +1504,10 @@ select option {
   display: grid;
   grid-template-rows: 1fr auto;
   gap: 8px;
-  width: min(28vw, 170px);
-  min-width: 138px;
-  min-height: 138px;
-  padding: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 176px;
+  padding: 10px;
   border: 2px solid rgba(118, 148, 190, 0.75);
   border-radius: 12px;
   color: #f8fafc;
@@ -1499,7 +1524,7 @@ select option {
 .mini-stage {
   position: relative;
   overflow: hidden;
-  min-height: 92px;
+  min-height: 114px;
   border: 1px solid rgba(65, 105, 225, 0.38);
   border-radius: 8px;
   background: #010101;
@@ -1600,14 +1625,6 @@ select option {
 
 .settings-grid label[title] {
   cursor: help;
-}
-
-
-@media (max-width: 860px) {
-  .combined-choice {
-    width: min(42vw, 170px);
-    min-width: 128px;
-  }
 }
 
 .direction-hotkey-chip {
