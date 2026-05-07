@@ -604,12 +604,30 @@ function presentCombinedChoices() {
   feedbackText.textContent = "Use number keys for fast reps.";
   choiceRow.innerHTML = "";
   const choices = buildCombinedChoices();
+  const groups = new Map();
+
   choices.forEach((choice, index) => {
+    const primaryDirection = getCombinedChoicePrimaryDirection(choice);
+    const slot = getCombinedChoiceGridSlot(primaryDirection);
+    const groupKey = `${slot.row}:${slot.column}`;
+    let group = groups.get(groupKey);
+
+    if (!group) {
+      group = document.createElement("div");
+      group.className = "combined-direction-group";
+      group.style.gridRow = String(slot.row);
+      group.style.gridColumn = String(slot.column);
+      group.dataset.stackSize = "0";
+      groups.set(groupKey, group);
+      choiceRow.appendChild(group);
+    }
+
     const button = document.createElement("button");
     button.className = "combined-choice";
     button.type = "button";
     const hotkey = index === 9 ? "0" : String(index + 1);
     button.dataset.hotkey = hotkey;
+    button.dataset.direction = primaryDirection.label;
     button.title = `Hotkey ${hotkey}`;
     renderCombinedChoice(button, choice, hotkey);
     button.addEventListener("click", (event) => {
@@ -617,7 +635,8 @@ function presentCombinedChoices() {
       event.stopPropagation();
       submitCombinedChoice(choice);
     });
-    choiceRow.appendChild(button);
+    group.appendChild(button);
+    group.dataset.stackSize = String(Math.min(10, group.children.length));
   });
 }
 
@@ -637,21 +656,69 @@ function buildCombinedChoices() {
   addChoice(state.current.center, correctDirections);
   const correctChoice = choices[0];
   addChoice(state.current.decoy, correctDirections);
-  addChoice(state.current.center, randomDirectionSet(targetCount, correctDirections));
-  addChoice(state.current.decoy, randomDirectionSet(targetCount, correctDirections));
+
+  const distractorDirectionSets = getSpatialDistractorDirectionSets(targetCount, correctDirections);
+  let alternateCenter = 0;
+  while (choices.length < count && distractorDirectionSets.length) {
+    const center = alternateCenter % 2 === 0 ? state.current.center : state.current.decoy;
+    addChoice(center, distractorDirectionSets.shift());
+    alternateCenter += 1;
+  }
+
   while (choices.length < count) {
     const center = Math.random() < 0.55 ? randomItem([state.current.center, state.current.decoy]) : randomItem(emojiPool);
     addChoice(center, randomDirectionSet(targetCount, Math.random() < 0.35 ? correctDirections : []));
   }
-  const wrong = choices.slice(1).slice(0, count - 1);
-  const all = [correctChoice, ...wrong];
-  all.sort((a, b) => {
-    const dirA = a.directions[0] ? a.directions[0].index : 0;
-    const dirB = b.directions[0] ? b.directions[0].index : 0;
-    if (dirA !== dirB) return dirA - dirB;
+
+  return sortCombinedChoicesSpatially([correctChoice, ...choices.filter((choice) => choice !== correctChoice)].slice(0, count));
+}
+
+function getSpatialDistractorDirectionSets(count, correctDirections) {
+  const correctKey = directionSetKey(correctDirections);
+  const directions = getDirections();
+  const seen = new Set([correctKey]);
+
+  if (count <= 1) {
+    return shuffle(directions)
+      .map((direction) => [direction])
+      .filter((set) => directionSetKey(set) !== correctKey);
+  }
+
+  const sets = [];
+  for (let attempt = 0; attempt < 160 && sets.length < directions.length * 2; attempt += 1) {
+    const set = shuffle(directions).slice(0, count);
+    const key = directionSetKey(set);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sets.push(set);
+  }
+  return sets;
+}
+
+function getCombinedChoicePrimaryDirection(choice) {
+  return choice.directions && choice.directions[0] ? choice.directions[0] : getDirections()[0];
+}
+
+function getCombinedChoiceGridSlot(direction) {
+  const radians = (direction.angle * Math.PI) / 180;
+  return {
+    column: clamp(Math.round(2 + Math.cos(radians)), 1, 3),
+    row: clamp(Math.round(2 - Math.sin(radians)), 1, 3)
+  };
+}
+
+function sortCombinedChoicesSpatially(choices) {
+  return choices.slice().sort((a, b) => {
+    const directionA = getCombinedChoicePrimaryDirection(a);
+    const directionB = getCombinedChoicePrimaryDirection(b);
+    const slotA = getCombinedChoiceGridSlot(directionA);
+    const slotB = getCombinedChoiceGridSlot(directionB);
+
+    if (slotA.row !== slotB.row) return slotA.row - slotB.row;
+    if (slotA.column !== slotB.column) return slotA.column - slotB.column;
+    if (directionA.index !== directionB.index) return directionA.index - directionB.index;
     return (a.center || "").localeCompare(b.center || "");
   });
-  return all;
 }
 
 function randomDirectionSet(count, avoid = []) {
