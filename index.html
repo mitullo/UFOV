@@ -3,7 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UFOV</title>
+    <title>UFOV – Useful Field of View Exercise</title>
+    <meta name="description" content="UFOV is a cognitive exercise that increases your mental speed and improves your brain health." />
+    <meta property="og:title" content="UFOV – Useful Field of View Exercise" />
+    <meta property="og:description" content="UFOV is a cognitive exercise that increases your mental speed and improves your brain health." />
+    <meta property="og:site_name" content="UFOV" />
+    <meta property="og:type" content="website" />
+    <meta name="theme-color" content="#4169E1" />
     <link rel="icon" type="image/png" sizes="16x16" href="icons/feather.png" />
     <link rel="icon" type="image/png" sizes="32x32" href="icons/feather.png" />
     <link rel="icon" type="image/png" sizes="48x48" href="icons/feather.png" />
@@ -25,16 +31,56 @@
         <div class="noise-mask" id="noiseMask"></div>
       </section>
 
+      <div class="timer-controls" aria-label="Timer controls">
+        <button class="icon-button timer-button" id="timerButton" type="button">Timer</button>
+        <span class="timer-readout hidden" id="timerReadout" aria-live="polite">00:00</span>
+      </div>
+
       <div class="floating-controls">
         <button class="icon-button hidden" id="pauseButton">Pause</button>
         <button class="icon-button" id="progressButton">Graph</button>
         <button class="icon-button" id="settingsButton">Settings</button>
       </div>
 
+      <section class="timer-panel hidden" id="timerPanel" role="dialog" aria-modal="true" aria-labelledby="timerPanelTitle">
+        <div class="timer-card">
+          <div class="timer-card-header">
+            <div>
+              <span class="timer-kicker">Session timer</span>
+              <h2 id="timerPanelTitle">Train for a set time</h2>
+            </div>
+            <button type="button" class="timer-close" id="timerCloseButton" aria-label="Close timer">&times;</button>
+          </div>
+
+          <p class="timer-copy">The countdown only runs while the session is active. Pausing the app also pauses the timer.</p>
+
+          <label class="timer-field">
+            Minutes
+            <input type="number" id="timerMinutesInput" min="1" max="240" step="1" value="15" inputmode="numeric" />
+          </label>
+
+          <div class="timer-actions">
+            <button type="button" class="primary-button" id="timerSetButton">Set timer</button>
+            <button type="button" class="secondary-button" id="timerClearButton">Clear</button>
+          </div>
+
+          <strong class="timer-status" id="timerStatusText">No timer set.</strong>
+        </div>
+      </section>
+
+      <section class="mobile-warning" id="mobileWarning" role="dialog" aria-modal="true" aria-labelledby="mobileWarningTitle">
+        <div class="mobile-warning-card">
+          <strong class="mobile-warning-kicker">Desktop recommended</strong>
+          <h2 id="mobileWarningTitle">UFOV training is not suited for mobile screens.</h2>
+          <p>This task depends on peripheral vision, precise spacing, and fast responses. For useful results, use a desktop or laptop in fullscreen mode.</p>
+          <button type="button" class="primary-button" id="mobileWarningContinue">Continue anyway</button>
+        </div>
+      </section>
+
       <section class="start-overlay" id="startOverlay">
         <div class="start-card">
           <h1>UFOV</h1>
-          <p>Test your Useful Field of View.</p>
+          <p>Useful Field of View Exercise</p>
           <ol>
             <li>Identify the center emoji.</li>
             <li>Locate the odd peripheral target.</li>
@@ -200,6 +246,11 @@
           <label class="toggle-row">
             <input type="checkbox" id="hotkeysInput" checked />
             Hotkeys
+          </label>
+
+          <label class="toggle-row">
+            <input type="checkbox" id="calmFieldInput" />
+            Cyan Background
           </label>
 
           <label>

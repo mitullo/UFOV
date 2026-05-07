@@ -46,9 +46,20 @@ const distractorSymbolInput = document.getElementById("distractorSymbolInput");
 const blurLettersInput = document.getElementById("blurLettersInput");
 const letterBlurInput = document.getElementById("letterBlurInput");
 const hotkeysInput = document.getElementById("hotkeysInput");
+const calmFieldInput = document.getElementById("calmFieldInput");
 const distractorInput = document.getElementById("distractorInput");
 const peripheralTargetInput = document.getElementById("peripheralTargetInput");
 const resetSettingsButton = document.getElementById("resetSettingsButton");
+const timerButton = document.getElementById("timerButton");
+const timerReadout = document.getElementById("timerReadout");
+const timerPanel = document.getElementById("timerPanel");
+const timerMinutesInput = document.getElementById("timerMinutesInput");
+const timerSetButton = document.getElementById("timerSetButton");
+const timerClearButton = document.getElementById("timerClearButton");
+const timerCloseButton = document.getElementById("timerCloseButton");
+const timerStatusText = document.getElementById("timerStatusText");
+const mobileWarning = document.getElementById("mobileWarning");
+const mobileWarningContinue = document.getElementById("mobileWarningContinue");
 
 const levelNames = ["Mode · Identification", "Mode · Divided Attention", "Mode · Selective Attention"];
 const emojiGroups = [
@@ -62,6 +73,9 @@ const emojiGroups = [
 const emojiPool = emojiGroups.flat();
 const FLASH_DURATION_KEY = "ufov_current_flash_ms";
 const SETTINGS_KEY = "ufov_settings";
+const TIMER_MINUTES_KEY = "ufov_timer_minutes";
+const TIMER_STATE_KEY = "ufov_timer_state";
+const MOBILE_WARNING_SESSION_KEY = "ufov_mobile_warning_seen";
 
 let state = createInitialState();
 let pendingTimer = null;
@@ -71,6 +85,8 @@ let sectorElements = [];
 let selectedSectorElements = [];
 let responseLock = true;
 let sessionToken = 0;
+let countdown = createCountdownState();
+let countdownTimer = null;
 let hoverDirection = null;
 
 function createInitialState() {
@@ -93,6 +109,15 @@ function createInitialState() {
     current: null,
     response: { center: null, peripherals: [] },
     awaitingPeripheral: false
+  };
+}
+
+function createCountdownState() {
+  return {
+    enabled: false,
+    totalMs: 0,
+    remainingMs: 0,
+    lastTick: null
   };
 }
 
@@ -316,6 +341,8 @@ function startSession() {
   const token = sessionToken;
   state = createInitialState();
   state.running = true;
+  countdown.lastTick = null;
+  updateTimerUi();
   startOverlay.classList.add("hidden");
   pauseButton.classList.remove("hidden");
   updateLayout();
@@ -328,6 +355,7 @@ function resetSession() {
   clearStage();
   sessionToken += 1;
   state = createInitialState();
+  clearCountdown(false);
   startOverlay.classList.remove("hidden");
   pauseButton.classList.add("hidden");
   responseOverlay.classList.remove("visible", "feedback-mode", "peripheral-chooser");
@@ -346,16 +374,216 @@ function togglePause() {
     clearStage();
     promptText.textContent = "Paused";
   } else {
+    countdown.lastTick = null;
     scheduleTrial(120, sessionToken);
   }
   updateStats();
+  updateTimerUi();
 }
 
 function scheduleTrial(delay, token) {
-  if (!state.running || state.paused) return;
-  wait(delay).then(() => {
-    if (token === sessionToken && !state.paused) runTrial(token);
-  });
+  pendingTimer = window.setTimeout(() => runTrial(token), delay);
+}
+
+function getSavedTimerMinutes() {
+  try {
+    const saved = Number(localStorage.getItem(TIMER_MINUTES_KEY));
+    if (Number.isFinite(saved) && saved >= 1 && saved <= 240) return saved;
+  } catch (_) {}
+  return 15;
+}
+
+function saveTimerMinutes(minutes) {
+  try {
+    localStorage.setItem(TIMER_MINUTES_KEY, String(minutes));
+  } catch (_) {}
+}
+
+function loadSavedCountdown() {
+  try {
+    const raw = localStorage.getItem(TIMER_STATE_KEY);
+    if (!raw) return null;
+
+    const saved = JSON.parse(raw);
+    const totalMs = Number(saved.totalMs);
+    const remainingMs = Number(saved.remainingMs);
+
+    if (!Number.isFinite(totalMs) || !Number.isFinite(remainingMs)) return null;
+    if (totalMs <= 0 || remainingMs <= 0) return null;
+
+    return {
+      enabled: saved.enabled !== false,
+      totalMs: clamp(totalMs, 60 * 1000, 240 * 60 * 1000),
+      remainingMs: clamp(remainingMs, 1, 240 * 60 * 1000),
+      lastTick: null
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveCountdownState() {
+  try {
+    if (!countdown.totalMs || countdown.remainingMs <= 0) {
+      localStorage.removeItem(TIMER_STATE_KEY);
+      return;
+    }
+
+    localStorage.setItem(TIMER_STATE_KEY, JSON.stringify({
+      enabled: countdown.enabled,
+      totalMs: Math.round(countdown.totalMs),
+      remainingMs: Math.round(countdown.remainingMs),
+      savedAt: Date.now()
+    }));
+  } catch (_) {}
+}
+
+function initializeTimerControls() {
+  if (timerMinutesInput) timerMinutesInput.value = String(getSavedTimerMinutes());
+  const savedCountdown = loadSavedCountdown();
+  if (savedCountdown) {
+    countdown = savedCountdown;
+    ensureCountdownTimer();
+  }
+  if (timerButton) timerButton.addEventListener("click", openTimerPanel);
+  if (timerCloseButton) timerCloseButton.addEventListener("click", closeTimerPanel);
+  if (timerSetButton) timerSetButton.addEventListener("click", setCountdownFromInput);
+  if (timerClearButton) timerClearButton.addEventListener("click", () => clearCountdown(true));
+  if (timerPanel) {
+    timerPanel.addEventListener("click", (event) => {
+      if (event.target === timerPanel) closeTimerPanel();
+    });
+  }
+  updateTimerUi();
+}
+
+function openTimerPanel() {
+  if (!timerPanel) return;
+  timerPanel.classList.remove("hidden");
+  updateTimerUi();
+  if (timerMinutesInput) timerMinutesInput.select();
+}
+
+function closeTimerPanel() {
+  if (timerPanel) timerPanel.classList.add("hidden");
+}
+
+function setCountdownFromInput() {
+  const minutes = Math.round(readNumber(timerMinutesInput, getSavedTimerMinutes(), 1, 240));
+  saveTimerMinutes(minutes);
+  countdown = {
+    enabled: true,
+    totalMs: minutes * 60 * 1000,
+    remainingMs: minutes * 60 * 1000,
+    lastTick: null
+  };
+  saveCountdownState();
+  ensureCountdownTimer();
+  updateTimerUi();
+  closeTimerPanel();
+}
+
+function clearCountdown(closePanel) {
+  countdown = createCountdownState();
+  try {
+    localStorage.removeItem(TIMER_STATE_KEY);
+  } catch (_) {}
+  stopCountdownTimer();
+  updateTimerUi();
+  if (closePanel) closeTimerPanel();
+}
+
+function ensureCountdownTimer() {
+  if (countdownTimer !== null) return;
+  countdownTimer = window.setInterval(tickCountdown, 250);
+}
+
+function stopCountdownTimer() {
+  if (countdownTimer !== null) {
+    window.clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
+  countdown.lastTick = null;
+}
+
+function tickCountdown() {
+  if (!countdown.enabled) {
+    stopCountdownTimer();
+    updateTimerUi();
+    return;
+  }
+
+  if (!state.running || state.paused) {
+    countdown.lastTick = null;
+    saveCountdownState();
+    updateTimerUi();
+    return;
+  }
+
+  const now = performance.now();
+  if (countdown.lastTick === null) {
+    countdown.lastTick = now;
+    updateTimerUi();
+    return;
+  }
+
+  countdown.remainingMs -= now - countdown.lastTick;
+  countdown.lastTick = now;
+
+  if (countdown.remainingMs <= 0) {
+    expireCountdown();
+    return;
+  }
+
+  saveCountdownState();
+  updateTimerUi();
+}
+
+function expireCountdown() {
+  countdown.enabled = false;
+  countdown.remainingMs = 0;
+  saveCountdownState();
+  stopCountdownTimer();
+  window.clearTimeout(pendingTimer);
+  sessionToken += 1;
+  state.paused = true;
+  clearStage();
+  responseOverlay.classList.remove("combined-mode", "peripheral-chooser");
+  responseOverlay.classList.add("visible", "feedback-mode");
+  promptText.className = "feedback-title correct";
+  promptText.textContent = "Timer done";
+  feedbackText.className = "success";
+  feedbackText.textContent = "Session paused. Take a break or press Resume to continue.";
+  pauseButton.classList.remove("hidden");
+  updateTimerUi();
+  updateStats();
+}
+
+function formatCountdown(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function updateTimerUi() {
+  const hasTimer = countdown.totalMs > 0 || countdown.remainingMs > 0;
+  const active = countdown.enabled && countdown.remainingMs > 0;
+  if (timerReadout) {
+    timerReadout.textContent = hasTimer ? formatCountdown(countdown.remainingMs) : "";
+    timerReadout.classList.toggle("hidden", !hasTimer);
+    timerReadout.classList.toggle("paused", active && (!state.running || state.paused));
+  }
+  if (timerButton) timerButton.classList.toggle("active", hasTimer);
+  if (timerStatusText) {
+    if (!hasTimer) timerStatusText.textContent = "No timer set.";
+    else if (!active) timerStatusText.textContent = "Timer finished.";
+    else if (!state.running) timerStatusText.textContent = `Ready: ${formatCountdown(countdown.remainingMs)}. Starts when you press Start.`;
+    else if (state.paused) timerStatusText.textContent = `Paused with app: ${formatCountdown(countdown.remainingMs)} left.`;
+    else timerStatusText.textContent = `Running: ${formatCountdown(countdown.remainingMs)} left.`;
+  }
 }
 
 async function runTrial(token) {
@@ -570,6 +798,7 @@ function presentResponseControls() {
   responseLock = false;
   responseOverlay.classList.add("visible");
   responseOverlay.classList.remove("feedback-mode", "peripheral-chooser");
+  promptText.className = "";
   promptText.textContent = "Which emoji was in the center?";
   choiceRow.innerHTML = "";
   const choices = shuffle([state.current.center, state.current.decoy]);
@@ -1184,7 +1413,10 @@ function directionFromKeyboard(event) {
 function handleKeyboard(event) {
   const formTarget = event.target && event.target.closest && event.target.closest("input, select, textarea");
   if (formTarget) {
-    if (event.key === "Escape") settingsPanel.classList.remove("open");
+    if (event.key === "Escape") {
+      settingsPanel.classList.remove("open");
+      closeTimerPanel();
+    }
     return;
   }
   if (event.key === " ") {
@@ -1194,6 +1426,7 @@ function handleKeyboard(event) {
   }
   if (event.key === "Escape") {
     settingsPanel.classList.remove("open");
+    closeTimerPanel();
     return;
   }
   if (!getSettings().hotkeys) return;
@@ -1257,6 +1490,7 @@ function applySettingExplainers() {
     blurLettersInput: "Blurs target and distractor symbols to make letter discrimination harder.",
     letterBlurInput: "Strength of the symbol blur in pixels.",
     hotkeysInput: "Enables number-key choices and keyboard direction selection.",
+    calmFieldInput: "A low-saturation cyan background.",
     peripheralTargetInput: "Number of peripheral targets that must be selected. If this is above 1, all targets must be selected correctly.",
     distractorInput: "Number of non-target symbols shown in selective attention mode.",
     rangeSlider: "How far from the center the peripheral stimuli can appear in circle mode."
@@ -1313,6 +1547,7 @@ const allSettingInputs = [
   blurLettersInput,
   letterBlurInput,
   hotkeysInput,
+  calmFieldInput,
   peripheralTargetInput,
   rangeSlider,
   distractorInput
@@ -1321,6 +1556,12 @@ const allSettingInputs = [
 startButton.addEventListener("click", startSession);
 settingsButton.addEventListener("click", () => settingsPanel.classList.add("open"));
 closeSettingsButton.addEventListener("click", () => settingsPanel.classList.remove("open"));
+document.addEventListener("click", (event) => {
+  if (!settingsPanel.classList.contains("open")) return;
+  if (settingsPanel.contains(event.target)) return;
+  if (settingsButton.contains(event.target)) return;
+  settingsPanel.classList.remove("open");
+});
 calibrateButton.addEventListener("click", calibrateDisplay);
 resetButton.addEventListener("click", resetSession);
 pauseButton.addEventListener("click", togglePause);
@@ -1351,6 +1592,7 @@ allSettingInputs.forEach((input) => {
   input.addEventListener("change", () => {
     saveSettings();
     updateLayout();
+    applyCalmField();
   });
 });
 [levelSelect, autoProgressInput, trialsToCheckInput, targetAccuracyInput, regressAccuracyInput, directionCountInput, peripheralTargetInput].filter(Boolean).forEach((input) => {
@@ -1391,6 +1633,7 @@ resetSettingsButton.addEventListener("click", () => {
     blurLettersInput: false,
     letterBlurInput: "2.5",
     hotkeysInput: true,
+    calmFieldInput: false,
     rangeSlider: "78",
     peripheralTargetInput: "1",
     distractorInput: "18"
@@ -1419,10 +1662,43 @@ function updateChoiceCountVisibility() {
   label.classList.toggle("hidden", !isCombined);
 }
 
+function initializeMobileWarning() {
+  if (!mobileWarning || !mobileWarningContinue) return;
+  const isSmallOrTouch = window.matchMedia("(pointer: coarse), (max-width: 760px)").matches;
+  if (!isSmallOrTouch) return;
+
+  let alreadyShown = false;
+  try {
+    alreadyShown = sessionStorage.getItem(MOBILE_WARNING_SESSION_KEY) === "1";
+  } catch (_) {}
+  if (alreadyShown) return;
+
+  mobileWarning.classList.add("visible");
+  mobileWarningContinue.addEventListener("click", dismissMobileWarning);
+  mobileWarning.addEventListener("click", (event) => {
+    if (event.target === mobileWarning) dismissMobileWarning();
+  });
+}
+
+function dismissMobileWarning() {
+  if (mobileWarning) mobileWarning.classList.remove("visible");
+  try {
+    sessionStorage.setItem(MOBILE_WARNING_SESSION_KEY, "1");
+  } catch (_) {}
+}
+
+function applyCalmField() {
+  const enabled = calmFieldInput ? calmFieldInput.checked : false;
+  document.body.classList.toggle("calm-field", enabled);
+}
+
 applyInputSteps();
 applySettingExplainers();
 loadSettings();
 updateLayout();
+applyCalmField();
+initializeTimerControls();
+initializeMobileWarning();
 updateStats();
 updateChoiceCountVisibility();
 

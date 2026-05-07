@@ -4,6 +4,8 @@ window.UFOVProgress = (() => {
 
   let modal = null;
   let activeTab = "recent";
+  let chartTooltip = null;
+  let chartHoverPoints = [];
 
   function loadHistory() {
     try {
@@ -84,7 +86,9 @@ window.UFOVProgress = (() => {
             <div class="chart-summary" id="chartSummary"></div>
             <div class="chart-wrap">
               <canvas id="progressCanvas" width="1280" height="560"></canvas>
+              <div class="chart-tooltip hidden" id="chartTooltip" role="status" aria-live="polite"></div>
             </div>
+            <div class="chart-passive-dates" id="chartPassiveDates"></div>
             <div class="chart-legend">
               <span><i class="legend-line flash"></i> Difficulty from flash</span>
               <span><i class="legend-line accuracy"></i> Accuracy</span>
@@ -100,6 +104,14 @@ window.UFOVProgress = (() => {
     `;
 
     document.body.appendChild(modal);
+
+    chartTooltip = modal.querySelector("#chartTooltip");
+
+    const chartCanvas = modal.querySelector("#progressCanvas");
+    if (chartCanvas) {
+      chartCanvas.addEventListener("pointermove", handleChartHover);
+      chartCanvas.addEventListener("pointerleave", hideChartTooltip);
+    }
 
     modal.querySelector(".progress-close").addEventListener("click", close);
     modal.querySelector(".progress-clear").addEventListener("click", clearHistory);
@@ -150,6 +162,7 @@ window.UFOVProgress = (() => {
   function render() {
     const history = loadHistory();
 
+    hideChartTooltip();
     renderTable(history);
 
     if (activeTab === "chart") {
@@ -195,6 +208,7 @@ window.UFOVProgress = (() => {
   function renderChart(history) {
     const canvas = document.getElementById("progressCanvas");
     const summary = document.getElementById("chartSummary");
+    const passiveDates = document.getElementById("chartPassiveDates");
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
@@ -202,6 +216,7 @@ window.UFOVProgress = (() => {
     const height = canvas.height;
     const chartState = getChartData(history);
     const data = chartState.rows;
+    chartHoverPoints = [];
 
     ctx.clearRect(0, 0, width, height);
     ctx.imageSmoothingEnabled = true;
@@ -213,6 +228,10 @@ window.UFOVProgress = (() => {
       summary.innerHTML = renderSummary(data, chartState.scope, chartState.current);
     }
 
+    if (passiveDates) {
+      passiveDates.innerHTML = data.length ? renderChartDateRange(data) : "";
+    }
+
     if (data.length < 2) {
       drawCenteredText(ctx, "Complete at least 2 matching progress checks to show a chart.", width, height);
       return;
@@ -222,7 +241,7 @@ window.UFOVProgress = (() => {
       left: 90,
       right: 90,
       top: 62,
-      bottom: 78
+      bottom: 96
     };
 
     const chartWidth = width - padding.left - padding.right;
@@ -230,6 +249,7 @@ window.UFOVProgress = (() => {
 
     drawGrid(ctx, padding, chartWidth, chartHeight);
     drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight);
+    drawDateAxisLabels(ctx, padding, chartWidth, chartHeight, data);
     drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.targetAccuracy, "#fbbf24", "target");
     drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.regressAccuracy, "#fb7185", "regress");
 
@@ -237,20 +257,29 @@ window.UFOVProgress = (() => {
       const x = padding.left + (index / (data.length - 1)) * chartWidth;
       const normalized = difficultyScore(row, chartState.current) / 100;
       const y = padding.top + chartHeight - normalized * chartHeight;
-      return { x, y };
+      return {
+        x,
+        y,
+        row,
+        index,
+        metric: "Difficulty",
+        value: difficultyScore(row, chartState.current)
+      };
     });
 
     const accuracyPoints = data.map((row, index) => {
       const x = padding.left + (index / (data.length - 1)) * chartWidth;
-      const normalized = clamp((Number(row.accuracy) || 0) / 100, 0, 1);
+      const value = Number(row.accuracy) || 0;
+      const normalized = clamp(value / 100, 0, 1);
       const y = padding.top + chartHeight - normalized * chartHeight;
-      return { x, y };
+      return { x, y, row, index, metric: "Accuracy", value };
     });
 
     drawLine(ctx, difficultyPoints, "#8b5cf6", 4);
     drawLine(ctx, accuracyPoints, "#22c55e", 4);
     drawDots(ctx, difficultyPoints, "#8b5cf6");
     drawDots(ctx, accuracyPoints, "#22c55e");
+    chartHoverPoints = [...difficultyPoints, ...accuracyPoints];
 
     ctx.fillStyle = "#d6d3d1";
     ctx.font = "800 18px Inter, system-ui, sans-serif";
@@ -258,11 +287,102 @@ window.UFOVProgress = (() => {
 
     ctx.fillStyle = "#8f8f8f";
     ctx.font = "700 15px Inter, system-ui, sans-serif";
-    ctx.fillText("Older checks", padding.left, height - 28);
+    ctx.fillText("Older checks", padding.left, height - 20);
 
     ctx.textAlign = "right";
-    ctx.fillText("Newer checks", width - padding.right, height - 28);
+    ctx.fillText("Newer checks", width - padding.right, height - 20);
     ctx.textAlign = "left";
+  }
+
+  function handleChartHover(event) {
+    if (!chartTooltip || !chartHoverPoints.length) return;
+
+    const canvas = event.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (event.clientX - rect.left) * scaleX;
+    const y = (event.clientY - rect.top) * scaleY;
+
+    const nearest = chartHoverPoints.reduce((best, point) => {
+      const distance = Math.hypot(point.x - x, point.y - y);
+      return distance < best.distance ? { point, distance } : best;
+    }, { point: null, distance: Infinity });
+
+    if (!nearest.point || nearest.distance > 22) {
+      hideChartTooltip();
+      return;
+    }
+
+    chartTooltip.innerHTML = renderChartTooltip(nearest.point);
+    chartTooltip.classList.remove("hidden");
+
+    const wrap = canvas.closest(".chart-wrap");
+    const wrapRect = wrap.getBoundingClientRect();
+    let left = event.clientX - wrapRect.left + 14;
+    let top = event.clientY - wrapRect.top + 14;
+
+    const maxLeft = wrap.clientWidth - chartTooltip.offsetWidth - 10;
+    const maxTop = wrap.clientHeight - chartTooltip.offsetHeight - 10;
+
+    if (left > maxLeft) {
+      left = event.clientX - wrapRect.left - chartTooltip.offsetWidth - 14;
+    }
+
+    if (top > maxTop) {
+      top = event.clientY - wrapRect.top - chartTooltip.offsetHeight - 14;
+    }
+
+    chartTooltip.style.left = `${clamp(left, 10, Math.max(10, maxLeft))}px`;
+    chartTooltip.style.top = `${clamp(top, 10, Math.max(10, maxTop))}px`;
+  }
+
+  function hideChartTooltip() {
+    if (chartTooltip) chartTooltip.classList.add("hidden");
+  }
+
+  function renderChartTooltip(point) {
+    const row = point.row;
+    const flashText = Math.round(row.flashBefore) === Math.round(row.flashAfter)
+      ? `${Math.round(row.flashAfter)}ms`
+      : `${Math.round(row.flashBefore)}ms → ${Math.round(row.flashAfter)}ms`;
+
+    return `
+      <strong>${escapeHtml(point.metric)} · ${Math.round(point.value)}%</strong>
+      <span>${escapeHtml(formatAbsoluteDate(row.date))}</span>
+      <span>${escapeHtml(row.modeName || `Mode ${row.mode}`)}</span>
+      <span>Flash: ${escapeHtml(flashText)} · Trials: ${row.correctCount}/${row.trials}</span>
+      <span>Accuracy: ${Math.round(row.accuracy)}% · Center: ${Math.round(row.centerAccuracy)}% · Peripheral: ${escapeHtml(formatPeripheral(row))}</span>
+      <span>${escapeHtml(formatSettings(row))}</span>
+      <span>Change: ${escapeHtml(getActionLabel(row.action))}</span>
+    `;
+  }
+
+  function renderChartDateRange(data) {
+    const first = data[0];
+    const latest = data[data.length - 1];
+
+    return `
+      <span>Showing <strong>${data.length}</strong> checks from <strong>${escapeHtml(formatChartDate(first.date))}</strong> to <strong>${escapeHtml(formatChartDate(latest.date))}</strong>.</span>
+      <span>Hover any dot for exact date, settings, flash, and scores.</span>
+    `;
+  }
+
+  function formatAbsoluteDate(timestamp) {
+    return new Date(timestamp).toLocaleString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function formatChartDate(timestamp) {
+    return new Date(timestamp).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric"
+    });
   }
 
   function getChartData(history) {
@@ -426,6 +546,34 @@ window.UFOVProgress = (() => {
 
     ctx.textAlign = "left";
     ctx.fillText("0–100 scale", padding.left, padding.top + chartHeight + 34);
+  }
+
+  function drawDateAxisLabels(ctx, padding, chartWidth, chartHeight, data) {
+    if (!data.length) return;
+
+    const indices = Array.from(new Set([
+      0,
+      Math.floor((data.length - 1) / 2),
+      data.length - 1
+    ]));
+
+    ctx.save();
+    ctx.fillStyle = "#737373";
+    ctx.font = "700 13px Inter, system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+
+    indices.forEach((index) => {
+      const x = padding.left + (data.length === 1 ? 0 : (index / (data.length - 1)) * chartWidth);
+      const y = padding.top + chartHeight + 58;
+
+      if (index === 0) ctx.textAlign = "left";
+      else if (index === data.length - 1) ctx.textAlign = "right";
+      else ctx.textAlign = "center";
+
+      ctx.fillText(formatChartDate(data[index].date), x, y);
+    });
+
+    ctx.restore();
   }
 
   function drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, value, color, label) {
