@@ -84,15 +84,19 @@ window.UFOVProgress = (() => {
 
           <div class="progress-panel hidden" data-panel="chart">
             <div class="chart-summary" id="chartSummary"></div>
-            <div class="chart-wrap">
-              <canvas id="progressCanvas" width="1280" height="560"></canvas>
-              <div class="chart-tooltip hidden" id="chartTooltip" role="status" aria-live="polite"></div>
-            </div>
-            <div class="chart-passive-dates" id="chartPassiveDates"></div>
-            <div class="chart-legend">
-              <span><i class="legend-line flash"></i> Difficulty from flash</span>
-              <span><i class="legend-line accuracy"></i> Accuracy</span>
-              <span><i class="legend-line target"></i> Target / regress lines</span>
+            <div class="chart-card">
+              <div class="chart-wrap">
+                <canvas id="progressCanvas" width="1200" height="470"></canvas>
+                <div class="chart-tooltip hidden" id="chartTooltip" role="status" aria-live="polite"></div>
+              </div>
+              <div class="chart-meta">
+                <div class="chart-passive-dates" id="chartPassiveDates"></div>
+                <div class="chart-legend">
+                  <span><i class="legend-line flash"></i> Difficulty from flash</span>
+                  <span><i class="legend-line accuracy"></i> Accuracy</span>
+                  <span><i class="legend-line target"></i> Target / regress lines</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -205,12 +209,24 @@ window.UFOVProgress = (() => {
     }).join("");
   }
 
+  function sizeChartCanvas(canvas) {
+    const wrap = canvas.closest(".chart-wrap");
+    const availableWidth = wrap ? wrap.clientWidth : 1120;
+    const availableHeight = wrap ? wrap.clientHeight : 360;
+    const width = clamp(Math.round(availableWidth - 20), 720, 1180);
+    const height = clamp(Math.round(availableHeight - 12), 300, 520);
+
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+  }
+
   function renderChart(history) {
     const canvas = document.getElementById("progressCanvas");
     const summary = document.getElementById("chartSummary");
     const passiveDates = document.getElementById("chartPassiveDates");
     if (!canvas) return;
 
+    sizeChartCanvas(canvas);
     const ctx = canvas.getContext("2d");
     const width = canvas.width;
     const height = canvas.height;
@@ -238,10 +254,10 @@ window.UFOVProgress = (() => {
     }
 
     const padding = {
-      left: 90,
-      right: 90,
-      top: 62,
-      bottom: 96
+      left: 72,
+      right: 44,
+      top: 50,
+      bottom: 34
     };
 
     const chartWidth = width - padding.left - padding.right;
@@ -249,7 +265,6 @@ window.UFOVProgress = (() => {
 
     drawGrid(ctx, padding, chartWidth, chartHeight);
     drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight);
-    drawDateAxisLabels(ctx, padding, chartWidth, chartHeight, data);
     drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.targetAccuracy, "#fbbf24", "target");
     drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.regressAccuracy, "#fb7185", "regress");
 
@@ -282,16 +297,8 @@ window.UFOVProgress = (() => {
     chartHoverPoints = [...difficultyPoints, ...accuracyPoints];
 
     ctx.fillStyle = "#d6d3d1";
-    ctx.font = "800 18px Inter, system-ui, sans-serif";
-    ctx.fillText("Higher is better: faster flash difficulty and accuracy", padding.left, 34);
-
-    ctx.fillStyle = "#8f8f8f";
-    ctx.font = "700 15px Inter, system-ui, sans-serif";
-    ctx.fillText("Older checks", padding.left, height - 20);
-
-    ctx.textAlign = "right";
-    ctx.fillText("Newer checks", width - padding.right, height - 20);
-    ctx.textAlign = "left";
+    ctx.font = "800 17px Inter, system-ui, sans-serif";
+    ctx.fillText("Higher is better: faster flash difficulty and accuracy", padding.left, 30);
   }
 
   function handleChartHover(event) {
@@ -534,7 +541,7 @@ window.UFOVProgress = (() => {
   }
 
   function drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight) {
-    ctx.font = "700 15px Inter, system-ui, sans-serif";
+    ctx.font = "700 13px Inter, system-ui, sans-serif";
     ctx.fillStyle = "#a8a29e";
     ctx.textAlign = "right";
 
@@ -545,35 +552,9 @@ window.UFOVProgress = (() => {
     }
 
     ctx.textAlign = "left";
-    ctx.fillText("0–100 scale", padding.left, padding.top + chartHeight + 34);
   }
 
   function drawDateAxisLabels(ctx, padding, chartWidth, chartHeight, data) {
-    if (!data.length) return;
-
-    const indices = Array.from(new Set([
-      0,
-      Math.floor((data.length - 1) / 2),
-      data.length - 1
-    ]));
-
-    ctx.save();
-    ctx.fillStyle = "#737373";
-    ctx.font = "700 13px Inter, system-ui, sans-serif";
-    ctx.textBaseline = "middle";
-
-    indices.forEach((index) => {
-      const x = padding.left + (data.length === 1 ? 0 : (index / (data.length - 1)) * chartWidth);
-      const y = padding.top + chartHeight + 58;
-
-      if (index === 0) ctx.textAlign = "left";
-      else if (index === data.length - 1) ctx.textAlign = "right";
-      else ctx.textAlign = "center";
-
-      ctx.fillText(formatChartDate(data[index].date), x, y);
-    });
-
-    ctx.restore();
   }
 
   function drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, value, color, label) {
@@ -592,7 +573,7 @@ window.UFOVProgress = (() => {
 
     ctx.setLineDash([]);
     ctx.fillStyle = color;
-    ctx.font = "800 13px Inter, system-ui, sans-serif";
+    ctx.font = "800 12px Inter, system-ui, sans-serif";
     ctx.textAlign = "right";
     ctx.fillText(`${label} ${Math.round(value)}%`, padding.left + chartWidth - 8, y - 8);
     ctx.textAlign = "left";
@@ -635,7 +616,7 @@ window.UFOVProgress = (() => {
 
   function drawCenteredText(ctx, text, width, height) {
     ctx.fillStyle = "#a8a29e";
-    ctx.font = "800 22px Inter, system-ui, sans-serif";
+    ctx.font = "800 18px Inter, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(text, width / 2, height / 2);
     ctx.textAlign = "left";

@@ -1,6 +1,14 @@
 const calibrateButton = document.getElementById("calibrateButton");
 const resetButton = document.getElementById("resetButton");
 const pauseButton = document.getElementById("pauseButton");
+const skipButton = document.getElementById("skipButton");
+const openHotkeyPanelButton = document.getElementById("openHotkeyPanelButton");
+const hotkeyPanel = document.getElementById("hotkeyPanel");
+const hotkeySections = document.getElementById("hotkeySections");
+const hotkeyHelp = document.getElementById("hotkeyHelp");
+const hotkeyCloseButton = document.getElementById("hotkeyCloseButton");
+const hotkeyDoneButton = document.getElementById("hotkeyDoneButton");
+const hotkeyResetButton = document.getElementById("hotkeyResetButton");
 const startButton = document.getElementById("startButton");
 const startOverlay = document.getElementById("startOverlay");
 const responseOverlay = document.getElementById("responseOverlay");
@@ -46,6 +54,11 @@ const distractorSymbolInput = document.getElementById("distractorSymbolInput");
 const blurLettersInput = document.getElementById("blurLettersInput");
 const letterBlurInput = document.getElementById("letterBlurInput");
 const hotkeysInput = document.getElementById("hotkeysInput");
+const centerHotkeysInput = document.getElementById("centerHotkeysInput");
+const combinedHotkeysInput = document.getElementById("combinedHotkeysInput");
+const directionHotkeysInput = document.getElementById("directionHotkeysInput");
+const pauseHotkeyInput = document.getElementById("pauseHotkeyInput");
+const skipHotkeyInput = document.getElementById("skipHotkeyInput");
 const calmFieldInput = document.getElementById("calmFieldInput");
 const distractorInput = document.getElementById("distractorInput");
 const peripheralTargetInput = document.getElementById("peripheralTargetInput");
@@ -76,6 +89,12 @@ const SETTINGS_KEY = "ufov_settings";
 const TIMER_MINUTES_KEY = "ufov_timer_minutes";
 const TIMER_STATE_KEY = "ufov_timer_state";
 const MOBILE_WARNING_SESSION_KEY = "ufov_mobile_warning_seen";
+const DEFAULT_CENTER_CHOICE_HOTKEYS = ["A", "D"];
+const DEFAULT_COMBINED_CHOICE_HOTKEYS = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "0"];
+const DEFAULT_DIRECTION_HOTKEYS = "E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C";
+const DEFAULT_PAUSE_HOTKEY = "Space";
+const DEFAULT_SKIP_HOTKEY = "Backspace";
+const DIRECTION_HOTKEY_LABELS = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
 
 let state = createInitialState();
 let pendingTimer = null;
@@ -83,11 +102,13 @@ let peripheralElements = [];
 let decoyElements = [];
 let sectorElements = [];
 let selectedSectorElements = [];
+let occupiedStimulusPoints = [];
 let responseLock = true;
 let sessionToken = 0;
 let countdown = createCountdownState();
 let countdownTimer = null;
 let hoverDirection = null;
+let activeHotkeyCapture = null;
 
 function createInitialState() {
   const settings = getSettings();
@@ -108,6 +129,7 @@ function createInitialState() {
     progressBlock: [],
     current: null,
     response: { center: null, peripherals: [] },
+    skippable: false,
     awaitingPeripheral: false
   };
 }
@@ -153,6 +175,11 @@ function getSettings() {
     blurLetters: blurLettersInput ? blurLettersInput.checked : false,
     letterBlur: readNumber(letterBlurInput, 2.5, 0, 12),
     hotkeys: hotkeysInput ? hotkeysInput.checked : true,
+    centerChoiceHotkeys: parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS),
+    combinedChoiceHotkeys: parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS),
+    directionHotkeyMap: parseDirectionHotkeyMap(directionHotkeysInput ? directionHotkeysInput.value : DEFAULT_DIRECTION_HOTKEYS),
+    pauseHotkey: readHotkey(pauseHotkeyInput, DEFAULT_PAUSE_HOTKEY),
+    skipHotkey: readHotkey(skipHotkeyInput, DEFAULT_SKIP_HOTKEY),
     targets: emojiPool
   };
 }
@@ -161,6 +188,121 @@ function readSymbol(input, fallback) {
   if (!input) return fallback;
   const value = String(input.value || "").trim();
   return value.length ? value.slice(0, 4) : fallback;
+}
+
+function readHotkey(input, fallback) {
+  if (!input) return normalizeHotkeyToken(fallback);
+  const value = String(input.value || "").trim();
+  return normalizeHotkeyToken(value || fallback);
+}
+
+function parseHotkeyList(input, fallback) {
+  const raw = input ? String(input.value || "") : "";
+  const parsed = raw
+    .split(/[,;|]/)
+    .map(normalizeHotkeyToken)
+    .filter(Boolean);
+  return parsed.length ? parsed : fallback.map(normalizeHotkeyToken);
+}
+
+function parseDirectionHotkeyMap(raw) {
+  const source = String(raw || DEFAULT_DIRECTION_HOTKEYS);
+  const map = {};
+
+  source.split(";").forEach((entry) => {
+    const [rawLabel, rawKeys] = entry.split("=");
+    if (!rawLabel || !rawKeys) return;
+    const label = rawLabel.trim().toUpperCase();
+    const keys = rawKeys
+      .split(/[,+/|]/)
+      .map(normalizeHotkeyToken)
+      .filter(Boolean);
+    if (label && keys.length) map[label] = keys;
+  });
+
+  return Object.keys(map).length ? map : parseDirectionHotkeyMap(DEFAULT_DIRECTION_HOTKEYS);
+}
+
+function normalizeHotkeyToken(value) {
+  const token = String(value || "").trim();
+  if (!token) return "";
+  const lower = token.toLowerCase().replace(/\s+/g, "");
+  const aliases = {
+    space: " ",
+    spacebar: " ",
+    esc: "escape",
+    escape: "escape",
+    enter: "enter",
+    return: "enter",
+    backspace: "backspace",
+    del: "delete",
+    delete: "delete",
+    up: "arrowup",
+    down: "arrowdown",
+    left: "arrowleft",
+    right: "arrowright"
+  };
+  if (aliases[lower]) return aliases[lower];
+  return token.length === 1 ? token.toLowerCase() : lower;
+}
+
+function displayHotkey(hotkey) {
+  const token = normalizeHotkeyToken(hotkey);
+  const names = {
+    " ": "Space",
+    arrowup: "\u2191",
+    arrowright: "\u2192",
+    arrowdown: "\u2193",
+    arrowleft: "\u2190",
+    escape: "Esc",
+    backspace: "Bksp",
+    delete: "Del"
+  };
+  if (names[token]) return names[token];
+  if (/^numpad\d$/i.test(token)) return `Num ${token.slice(-1)}`;
+  if (/^key[a-z]$/i.test(token)) return token.slice(-1).toUpperCase();
+  return token.length === 1 ? token.toUpperCase() : token;
+}
+
+function serializeHotkeyToken(hotkey) {
+  const token = normalizeHotkeyToken(hotkey);
+  const names = {
+    " ": "Space",
+    arrowup: "ArrowUp",
+    arrowright: "ArrowRight",
+    arrowdown: "ArrowDown",
+    arrowleft: "ArrowLeft",
+    escape: "Escape",
+    enter: "Enter",
+    backspace: "Backspace",
+    delete: "Delete"
+  };
+  if (names[token]) return names[token];
+  if (/^numpad\d$/i.test(token)) return `Numpad${token.slice(-1)}`;
+  if (/^key[a-z]$/i.test(token)) return token.slice(-1).toUpperCase();
+  return token.length === 1 ? token.toUpperCase() : token;
+}
+
+function hotkeyFromEvent(event) {
+  if (/^Numpad\d$/i.test(event.code)) return event.code;
+  if (event.key === " ") return "Space";
+  return event.key || event.code;
+}
+
+function eventHotkeyVariants(event) {
+  const variants = new Set([normalizeHotkeyToken(event.key), normalizeHotkeyToken(event.code)]);
+  const numpadDigit = /^Numpad(\d)$/i.exec(event.code);
+  if (numpadDigit) variants.add(numpadDigit[1]);
+  return variants;
+}
+
+function eventMatchesHotkey(event, hotkey) {
+  return eventHotkeyVariants(event).has(normalizeHotkeyToken(hotkey));
+}
+
+function findHotkeyIndex(event, hotkeys) {
+  const variants = eventHotkeyVariants(event);
+  return hotkeys.findIndex((hotkey) => variants.has(normalizeHotkeyToken(hotkey)));
 }
 
 function readNumber(input, fallback, min, max) {
@@ -234,17 +376,24 @@ function getSectorWidth() {
 }
 
 function getDirectionHotkey(direction) {
-  const number = direction.index + 1;
-  if (number >= 1 && number <= 9) return String(number);
-  if (number === 10) return "0";
-  return String(number);
+  return displayHotkey(getDirectionHotkeys(direction)[0] || String(direction.index + 1));
 }
 
 function getKeyboardDirectionHotkey(direction) {
+  return getDirectionHotkeys(direction).map(displayHotkey).join(", ");
+}
+
+function getDirectionHotkeys(direction) {
+  const settings = getSettings();
+  const labelKeys = settings.directionHotkeyMap[String(direction.label || "").toUpperCase()];
+  if (labelKeys && labelKeys.length) return labelKeys;
+
   const number = direction.index + 1;
-  if (number >= 1 && number <= 9) return String(number);
-  if (number === 10) return "0";
-  return "";
+  const numericLabelKeys = settings.directionHotkeyMap[String(number)];
+  if (numericLabelKeys && numericLabelKeys.length) return numericLabelKeys;
+  if (number >= 1 && number <= 9) return [String(number)];
+  if (number === 10) return ["0"];
+  return [];
 }
 
 function miniPositionFromDirection(angle, radiusPercent) {
@@ -338,6 +487,7 @@ function startSession() {
   window.clearTimeout(pendingTimer);
   clearStage();
   sessionToken += 1;
+  state.skippable = false;
   const token = sessionToken;
   state = createInitialState();
   state.running = true;
@@ -354,6 +504,7 @@ function resetSession() {
   window.clearTimeout(pendingTimer);
   clearStage();
   sessionToken += 1;
+  setTrialCursorHidden(false);
   state = createInitialState();
   clearCountdown(false);
   startOverlay.classList.remove("hidden");
@@ -371,10 +522,14 @@ function togglePause() {
   state.paused = !state.paused;
   if (state.paused) {
     window.clearTimeout(pendingTimer);
+    state.skippable = false;
+    setTrialCursorHidden(false);
     clearStage();
     promptText.textContent = "Paused";
   } else {
     countdown.lastTick = null;
+    state.skippable = false;
+    setTrialCursorHidden(true);
     scheduleTrial(120, sessionToken);
   }
   updateStats();
@@ -547,6 +702,7 @@ function expireCountdown() {
   window.clearTimeout(pendingTimer);
   sessionToken += 1;
   state.paused = true;
+  state.skippable = false;
   clearStage();
   responseOverlay.classList.remove("combined-mode", "peripheral-chooser");
   responseOverlay.classList.add("visible", "feedback-mode");
@@ -597,23 +753,58 @@ async function runTrial(token) {
   state.response = { center: null, peripherals: [] };
   state.awaitingPeripheral = false;
   state.current = createTrial();
+  state.skippable = true;
+  setTrialCursorHidden(true);
   feedbackText.className = "";
   feedbackText.textContent = "";
   choiceRow.innerHTML = "";
   responseOverlay.classList.remove("visible", "feedback-mode", "peripheral-chooser");
   promptText.textContent = "Focus on the +";
   updateStats();
-  await wait(Math.max(settings.fixationMs, 0));
-  if (!state.running || state.paused || token !== sessionToken) return;
-  showStimuli(state.current);
-  await holdStimulusForFrames(state.duration);
-  if (!state.running || state.paused || token !== sessionToken) return;
-  hideStimuli();
-  showMask();
-  await wait(settings.maskMs);
-  if (!state.running || state.paused || token !== sessionToken) return;
-  hideMask();
-  presentResponseControls();
+  try {
+    await wait(Math.max(settings.fixationMs, 0));
+    if (!state.running || state.paused || token !== sessionToken) return;
+    showStimuli(state.current);
+    await holdStimulusForFrames(state.duration);
+    if (!state.running || state.paused || token !== sessionToken) return;
+    hideStimuli();
+    showMask();
+    await wait(settings.maskMs);
+    if (!state.running || state.paused || token !== sessionToken) return;
+    hideMask();
+    presentResponseControls();
+  } finally {
+    setTrialCursorHidden(false);
+  }
+}
+
+function setTrialCursorHidden(hidden) {
+  document.body.classList.toggle("trial-flash-active", hidden);
+}
+
+function skipCurrentTrial() {
+  if (!state.running || state.paused || !state.current || !state.skippable) return false;
+
+  const token = ++sessionToken;
+  window.clearTimeout(pendingTimer);
+  setTrialCursorHidden(false);
+  state.skippable = false;
+  state.awaitingPeripheral = false;
+  state.current = null;
+  state.response = { center: null, peripherals: [] };
+  state.trial = Math.max(0, state.trial - 1);
+  state.levelTrial = Math.max(0, state.levelTrial - 1);
+  clearStage();
+  responseOverlay.classList.remove("combined-mode", "peripheral-chooser");
+  responseOverlay.classList.add("visible", "feedback-mode");
+  promptText.className = "feedback-title";
+  promptText.textContent = "Skipped";
+  feedbackText.className = "";
+  feedbackText.textContent = "";
+  choiceRow.innerHTML = "";
+  updateStats();
+  scheduleTrial(350, token);
+  return true;
 }
 
 function createTrial() {
@@ -644,6 +835,7 @@ async function holdStimulusForFrames(duration) {
 function showStimuli(trial) {
   const fixation = document.getElementById("fixation");
   if (fixation) fixation.classList.add("hidden");
+  occupiedStimulusPoints = [];
   centerStimulus.textContent = trial.center;
   centerStimulus.classList.add("visible");
   if (state.level >= 2) {
@@ -698,33 +890,33 @@ function clearStage() {
   removeSelectedSectorMarks();
   peripheralElements.forEach((element) => element.remove());
   decoyElements.forEach((element) => element.remove());
+  occupiedStimulusPoints = [];
   peripheralElements = [];
   decoyElements = [];
   responseLock = true;
 }
 
 function createPeripheralTarget(direction) {
+  const settings = getSettings();
   const element = document.createElement("div");
   element.className = "peripheral-target visible";
-  element.textContent = getSettings().targetSymbol;
-  const jitter = getSettings().stimulusArea === "full" ? 0.22 + Math.random() * 0.78 : 0.3 + Math.random() * 0.7;
-  const position = positionFromDirection(direction.angle, getSettings().peripheralRange * jitter);
+  element.textContent = settings.targetSymbol;
+  const jitter = settings.stimulusArea === "full" ? 0.22 + Math.random() * 0.78 : 0.3 + Math.random() * 0.7;
+  const radius = settings.peripheralRange * jitter;
+  const position = positionFromDirection(direction.angle, radius);
   element.style.left = position.x;
   element.style.top = position.y;
   stage.appendChild(element);
   peripheralElements.push(element);
+  occupiedStimulusPoints.push({ angle: direction.angle, radius });
 }
 
 function createDistractors(targetDirections) {
   const settings = getSettings();
   const directions = getDirections();
   if (settings.distractors <= 0) return;
-  const placed = [];
+  const placed = occupiedStimulusPoints.slice();
   const targetKeys = new Set(targetDirections.map(directionKey));
-  targetDirections.forEach((direction) => {
-    const jitter = settings.stimulusArea === "full" ? 0.22 + Math.random() * 0.78 : 0.3 + Math.random() * 0.7;
-    placed.push({ angle: direction.angle, radius: settings.peripheralRange * jitter });
-  });
   const nonTargetDirs = directions.filter((direction) => !targetKeys.has(directionKey(direction)));
   const perDirCount = Math.min(nonTargetDirs.length, settings.distractors);
   for (let i = 0; i < perDirCount; i += 1) {
@@ -741,15 +933,23 @@ function createDistractors(targetDirections) {
       angle = Math.random() * 360;
       radius = 12 + Math.random() * (settings.peripheralRange - 12);
       const tooClose = placed.some((point) => {
-        const angleDistance = Math.min(Math.abs(angle - point.angle), 360 - Math.abs(angle - point.angle));
-        const radiusDistance = Math.abs(radius - point.radius);
-        return angleDistance < 20 && radiusDistance < 10;
+        return polarDistance(angle, radius, point.angle, point.radius) < 18;
       });
       if (!tooClose) break;
     }
     placed.push({ angle, radius });
     addDecoy(angle, radius);
   }
+}
+
+function polarDistance(angleA, radiusA, angleB, radiusB) {
+  const radiansA = (angleA * Math.PI) / 180;
+  const radiansB = (angleB * Math.PI) / 180;
+  const xA = Math.cos(radiansA) * radiusA;
+  const yA = Math.sin(radiansA) * radiusA;
+  const xB = Math.cos(radiansB) * radiusB;
+  const yB = Math.sin(radiansB) * radiusB;
+  return Math.hypot(xA - xB, yA - yB);
 }
 
 function addDecoy(angle, radius) {
@@ -787,6 +987,7 @@ function positionFromDirection(angle, radiusPercent) {
 }
 
 function presentResponseControls() {
+  setTrialCursorHidden(false);
   const fixation = document.getElementById("fixation");
   if (fixation) fixation.classList.add("hidden");
   if (state.level >= 2 && getSettings().responseStyle === "combined") {
@@ -802,13 +1003,16 @@ function presentResponseControls() {
   promptText.textContent = "Which emoji was in the center?";
   choiceRow.innerHTML = "";
   const choices = shuffle([state.current.center, state.current.decoy]);
+  const hotkeys = getSettings().centerChoiceHotkeys;
   choices.forEach((choice, index) => {
     const button = document.createElement("button");
     button.className = "choice-button emoji-choice";
     button.type = "button";
     button.textContent = choice;
-    button.dataset.hotkey = String(index + 1);
-    button.title = `Hotkey ${index + 1}`;
+    const hotkey = hotkeys[index] || String(index + 1);
+    button.dataset.hotkey = hotkey;
+    button.dataset.hotkeyIndex = String(index);
+    button.title = `Hotkey ${displayHotkey(hotkey)}`;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -816,7 +1020,7 @@ function presentResponseControls() {
     });
     const hint = document.createElement("span");
     hint.className = "hotkey-hint";
-    hint.textContent = String(index + 1);
+    hint.textContent = displayHotkey(hotkey);
     button.appendChild(hint);
     choiceRow.appendChild(button);
   });
@@ -830,43 +1034,40 @@ function presentCombinedChoices() {
   choiceRow.classList.add("combined");
   promptText.className = "";
   promptText.textContent = "Pick the emoji and location.";
-  feedbackText.textContent = "Use number keys for fast reps.";
+  feedbackText.textContent = getSettings().hotkeys ? "Use hotkeys for fast reps." : "Click the matching card.";
   choiceRow.innerHTML = "";
   const choices = buildCombinedChoices();
-  const groups = new Map();
+  const configuredHotkeys = getSettings().combinedChoiceHotkeys;
+  const hotkeys = Array.from({ length: choices.length }, (_, index) => configuredHotkeys[index] || DEFAULT_COMBINED_CHOICE_HOTKEYS[index] || String(index + 1));
+  const visibleSlotCount = Math.max(choices.length, hotkeys.length);
 
-  choices.forEach((choice, index) => {
-    const primaryDirection = getCombinedChoicePrimaryDirection(choice);
-    const slot = getCombinedChoiceGridSlot(primaryDirection);
-    const groupKey = `${slot.row}:${slot.column}`;
-    let group = groups.get(groupKey);
-
-    if (!group) {
-      group = document.createElement("div");
-      group.className = "combined-direction-group";
-      group.style.gridRow = String(slot.row);
-      group.style.gridColumn = String(slot.column);
-      group.dataset.stackSize = "0";
-      groups.set(groupKey, group);
-      choiceRow.appendChild(group);
+  for (let index = 0; index < visibleSlotCount; index += 1) {
+    const choice = choices[index];
+    const gridArea = getCombinedChoiceGridArea(index);
+    if (!choice) {
+      const placeholder = document.createElement("div");
+      placeholder.className = "combined-choice-placeholder";
+      placeholder.style.gridArea = gridArea;
+      choiceRow.appendChild(placeholder);
+      continue;
     }
 
     const button = document.createElement("button");
     button.className = "combined-choice";
     button.type = "button";
-    const hotkey = index === 9 ? "0" : String(index + 1);
+    const hotkey = hotkeys[index];
     button.dataset.hotkey = hotkey;
-    button.dataset.direction = primaryDirection.label;
-    button.title = `Hotkey ${hotkey}`;
+    button.dataset.hotkeyIndex = String(index);
+    button.style.gridArea = gridArea;
+    button.title = `Hotkey ${displayHotkey(hotkey)}`;
     renderCombinedChoice(button, choice, hotkey);
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
       submitCombinedChoice(choice);
     });
-    group.appendChild(button);
-    group.dataset.stackSize = String(Math.min(10, group.children.length));
-  });
+    choiceRow.appendChild(button);
+  }
 }
 
 function buildCombinedChoices() {
@@ -950,6 +1151,11 @@ function sortCombinedChoicesSpatially(choices) {
   });
 }
 
+function getCombinedChoiceGridArea(index) {
+  const areas = ["slot0", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9"];
+  return areas[index] || areas[areas.length - 1];
+}
+
 function randomDirectionSet(count, avoid = []) {
   const avoidKey = directionSetKey(avoid);
   const directions = getDirections();
@@ -977,7 +1183,7 @@ function renderCombinedChoice(button, choice, hotkey) {
   stageMini.appendChild(center);
   const label = document.createElement("span");
   label.className = "combined-label";
-  label.innerHTML = `<span>${choice.directions.map((direction) => direction.label).join("+")}</span><span class="hotkey-hint">${hotkey}</span>`;
+  label.innerHTML = `<span>${choice.directions.map((direction) => direction.label).join("+")}</span><span class="hotkey-hint">${displayHotkey(hotkey)}</span>`;
   button.appendChild(stageMini);
   button.appendChild(label);
 }
@@ -1006,10 +1212,11 @@ function presentPeripheralChooser() {
   responseOverlay.classList.remove("visible");
   responseOverlay.classList.add("peripheral-chooser");
   stage.classList.add("selecting-location");
+  const settings = getSettings();
   const count = getRequiredPeripheralCount();
-  promptText.textContent = count === 1 ? `Where was the ${getSettings().targetSymbol}?` : `Select all ${count} targets.`;
+  promptText.textContent = count === 1 ? `Where was the ${settings.targetSymbol}?` : `Select all ${count} targets.`;
   promptText.className = "";
-  feedbackText.textContent = count === 1 ? "Click a slice or use direction hotkeys." : `0/${count} selected`;
+  feedbackText.textContent = count === 1 ? (settings.hotkeys ? "Click a slice or use direction hotkeys." : "Click a slice to choose location.") : `0/${count} selected`;
   responseOverlay.classList.add("visible");
   createSectors();
   window.setTimeout(() => {
@@ -1078,7 +1285,7 @@ function createSectors() {
     const keyboardHotkey = getKeyboardDirectionHotkey(direction);
 
     chip.innerHTML = `<strong>${shownNumber}</strong><span>${direction.label}</span>`;
-    chip.title = keyboardHotkey ? `${direction.name} · hotkey ${keyboardHotkey}` : direction.name;
+    chip.title = keyboardHotkey ? `${direction.name} · hotkeys ${keyboardHotkey}` : direction.name;
     chip.setAttribute("aria-label", chip.title);
 
     const position = positionFromDirection(direction.angle, labelRadius);
@@ -1186,6 +1393,7 @@ function removeSelectedSectorMarks() {
 
 function finishTrial() {
   responseLock = true;
+  state.skippable = false;
   hideDirectionPreview();
   stage.classList.remove("selecting-location");
   responseOverlay.classList.remove("visible", "peripheral-chooser");
@@ -1329,6 +1537,10 @@ function updateStats() {
     runStatus.classList.toggle("paused", state.paused);
   }
   pauseButton.textContent = state.paused ? "Resume" : "Pause";
+  if (skipButton) {
+    skipButton.classList.toggle("hidden", !state.running);
+    skipButton.disabled = !state.skippable || state.paused;
+  }
 }
 
 function setDirectionPreview(direction) {
@@ -1351,19 +1563,16 @@ function hideDirectionPreview() {
   if (!responseOverlay.classList.contains("feedback-mode")) promptText.className = "";
 }
 
-function handleChoiceHotkey(key) {
+function handleChoiceHotkey(event) {
   if (!getSettings().hotkeys) return false;
   if (responseLock) return false;
-  const hotkey = key === "0" ? "0" : String(Number(key));
-  if (hotkey === "0") {
-    const button = choiceRow.querySelector('[data-hotkey="0"]');
-    if (!button) return false;
-    button.click();
-    return true;
-  }
-  const number = Number(key);
-  if (!Number.isInteger(number) || number < 1) return false;
-  const button = choiceRow.querySelector(`[data-hotkey="${number}"]`);
+  const settings = getSettings();
+  const hotkeys = responseOverlay.classList.contains("combined-mode")
+    ? settings.combinedChoiceHotkeys
+    : settings.centerChoiceHotkeys;
+  const index = findHotkeyIndex(event, hotkeys);
+  if (index < 0) return false;
+  const button = choiceRow.querySelector(`[data-hotkey-index="${index}"]`);
   if (!button) return false;
   button.click();
   return true;
@@ -1371,6 +1580,11 @@ function handleChoiceHotkey(key) {
 
 function directionFromKeyboard(event) {
   const directions = getDirections();
+  const mappedDirection = directions.find((direction) => {
+    return getDirectionHotkeys(direction).some((hotkey) => eventMatchesHotkey(event, hotkey));
+  });
+  if (mappedDirection) return mappedDirection;
+
   const angleMap = {
     ArrowRight: 0,
     KeyD: 0,
@@ -1412,25 +1626,36 @@ function directionFromKeyboard(event) {
 
 function handleKeyboard(event) {
   const formTarget = event.target && event.target.closest && event.target.closest("input, select, textarea");
+  const settings = getSettings();
   if (formTarget) {
     if (event.key === "Escape") {
       settingsPanel.classList.remove("open");
       closeTimerPanel();
+      closeHotkeyPanel();
     }
     return;
   }
-  if (event.key === " ") {
+  if (hotkeyPanel && !hotkeyPanel.classList.contains("hidden")) {
+    if (event.key === "Escape") closeHotkeyPanel();
+    return;
+  }
+  if (settings.hotkeys && eventMatchesHotkey(event, settings.pauseHotkey)) {
     event.preventDefault();
     if (state.running) togglePause();
+    return;
+  }
+  if (settings.hotkeys && eventMatchesHotkey(event, settings.skipHotkey)) {
+    if (skipCurrentTrial()) event.preventDefault();
     return;
   }
   if (event.key === "Escape") {
     settingsPanel.classList.remove("open");
     closeTimerPanel();
+    closeHotkeyPanel();
     return;
   }
-  if (!getSettings().hotkeys) return;
-  if (handleChoiceHotkey(event.key)) {
+  if (!settings.hotkeys) return;
+  if (handleChoiceHotkey(event)) {
     event.preventDefault();
     return;
   }
@@ -1489,7 +1714,8 @@ function applySettingExplainers() {
     distractorSymbolInput: "The non-target symbol used as noise, for example Y, U, or Q.",
     blurLettersInput: "Blurs target and distractor symbols to make letter discrimination harder.",
     letterBlurInput: "Strength of the symbol blur in pixels.",
-    hotkeysInput: "Enables number-key choices and keyboard direction selection.",
+    hotkeysInput: "Enables keyboard shortcuts and the visible hotkey badges.",
+    openHotkeyPanelButton: "Open the button-based hotkey editor.",
     calmFieldInput: "A low-saturation cyan background.",
     peripheralTargetInput: "Number of peripheral targets that must be selected. If this is above 1, all targets must be selected correctly.",
     distractorInput: "Number of non-target symbols shown in selective attention mode.",
@@ -1523,6 +1749,155 @@ function applyInputSteps() {
   });
 }
 
+function applyHotkeyUiState() {
+  const enabled = hotkeysInput ? hotkeysInput.checked : true;
+  document.body.classList.toggle("hotkeys-disabled", !enabled);
+}
+
+function openHotkeyPanel() {
+  if (!hotkeyPanel) return;
+  renderHotkeyPanel();
+  hotkeyPanel.classList.remove("hidden");
+}
+
+function closeHotkeyPanel() {
+  stopHotkeyCapture();
+  if (hotkeyPanel) hotkeyPanel.classList.add("hidden");
+}
+
+function resetHotkeysToDefaults() {
+  if (centerHotkeysInput) centerHotkeysInput.value = DEFAULT_CENTER_CHOICE_HOTKEYS.join(",");
+  if (combinedHotkeysInput) combinedHotkeysInput.value = DEFAULT_COMBINED_CHOICE_HOTKEYS.join(",");
+  if (directionHotkeysInput) directionHotkeysInput.value = DEFAULT_DIRECTION_HOTKEYS;
+  if (pauseHotkeyInput) pauseHotkeyInput.value = DEFAULT_PAUSE_HOTKEY;
+  if (skipHotkeyInput) skipHotkeyInput.value = DEFAULT_SKIP_HOTKEY;
+  saveSettings();
+  renderHotkeyPanel();
+  applyHotkeyUiState();
+}
+
+function createHotkeySection(title) {
+  const section = document.createElement("section");
+  section.className = "hotkey-section";
+  const heading = document.createElement("h3");
+  heading.textContent = title;
+  const grid = document.createElement("div");
+  grid.className = "hotkey-button-grid";
+  section.appendChild(heading);
+  section.appendChild(grid);
+  hotkeySections.appendChild(section);
+  return grid;
+}
+
+function addHotkeyButton(grid, label, hotkey, applyValue) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "hotkey-capture-button";
+  button.innerHTML = `<span>${label}</span><strong>${displayHotkey(hotkey)}</strong>`;
+  button.addEventListener("click", () => beginHotkeyCapture(button, applyValue));
+  grid.appendChild(button);
+}
+
+function renderHotkeyPanel() {
+  if (!hotkeySections) return;
+  hotkeySections.innerHTML = "";
+  if (hotkeyHelp) hotkeyHelp.textContent = "Click a key button, then press the new key. Esc cancels capture.";
+
+  const centerHotkeys = parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS);
+  const combinedHotkeys = parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS);
+
+  const generalGrid = createHotkeySection("General");
+  addHotkeyButton(generalGrid, "Pause / resume", readHotkey(pauseHotkeyInput, DEFAULT_PAUSE_HOTKEY), (value) => {
+    if (pauseHotkeyInput) pauseHotkeyInput.value = serializeHotkeyToken(value);
+  });
+  addHotkeyButton(generalGrid, "Skip trial", readHotkey(skipHotkeyInput, DEFAULT_SKIP_HOTKEY), (value) => {
+    if (skipHotkeyInput) skipHotkeyInput.value = serializeHotkeyToken(value);
+  });
+
+  const centerGrid = createHotkeySection("Center choices");
+  for (let index = 0; index < 2; index += 1) {
+    addHotkeyButton(centerGrid, `Choice ${index + 1}`, centerHotkeys[index] || DEFAULT_CENTER_CHOICE_HOTKEYS[index], (value) => {
+      setIndexedHotkey(centerHotkeysInput, index, value, DEFAULT_CENTER_CHOICE_HOTKEYS);
+    });
+  }
+
+  const combinedGrid = createHotkeySection("Combined choices");
+  for (let index = 0; index < 10; index += 1) {
+    addHotkeyButton(combinedGrid, `Card ${index + 1}`, combinedHotkeys[index] || DEFAULT_COMBINED_CHOICE_HOTKEYS[index], (value) => {
+      setIndexedHotkey(combinedHotkeysInput, index, value, DEFAULT_COMBINED_CHOICE_HOTKEYS);
+    });
+  }
+
+  const directionGrid = createHotkeySection("Directions");
+  getDirections().forEach((direction) => {
+    addHotkeyButton(directionGrid, direction.name, getDirectionHotkeys(direction)[0] || "", (value) => {
+      setDirectionHotkey(direction.label, value);
+    });
+  });
+}
+
+function beginHotkeyCapture(button, applyValue) {
+  stopHotkeyCapture(false);
+  activeHotkeyCapture = { button, applyValue };
+  button.classList.add("capturing");
+  const value = button.querySelector("strong");
+  if (value) value.textContent = "Press key";
+  if (hotkeyHelp) hotkeyHelp.textContent = "Press the new key now. Esc cancels.";
+}
+
+function stopHotkeyCapture(resetHelp = true) {
+  if (activeHotkeyCapture && activeHotkeyCapture.button) {
+    activeHotkeyCapture.button.classList.remove("capturing");
+  }
+  activeHotkeyCapture = null;
+  if (resetHelp && hotkeyHelp) hotkeyHelp.textContent = "Click a key button, then press the new key. Esc cancels capture.";
+}
+
+function handleHotkeyCapture(event) {
+  if (!activeHotkeyCapture) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (event.key === "Escape") {
+    stopHotkeyCapture();
+    renderHotkeyPanel();
+    return;
+  }
+  const hotkey = hotkeyFromEvent(event);
+  if (!hotkey) return;
+  activeHotkeyCapture.applyValue(hotkey);
+  stopHotkeyCapture(false);
+  saveSettings();
+  renderHotkeyPanel();
+  applyHotkeyUiState();
+}
+
+function setIndexedHotkey(input, index, value, fallback) {
+  if (!input) return;
+  const keys = parseHotkeyList(input, fallback).map(serializeHotkeyToken);
+  while (keys.length <= index) keys.push(serializeHotkeyToken(fallback[keys.length] || String(keys.length + 1)));
+  keys[index] = serializeHotkeyToken(value);
+  input.value = keys.join(",");
+}
+
+function setDirectionHotkey(label, value) {
+  if (!directionHotkeysInput) return;
+  const map = parseDirectionHotkeyMap(directionHotkeysInput.value);
+  map[String(label).toUpperCase()] = [serializeHotkeyToken(value)];
+  directionHotkeysInput.value = serializeDirectionHotkeyMap(map);
+}
+
+function serializeDirectionHotkeyMap(map) {
+  const labels = [
+    ...DIRECTION_HOTKEY_LABELS,
+    ...getDirections().map((direction) => String(direction.label).toUpperCase()),
+    ...Object.keys(map)
+  ];
+  return Array.from(new Set(labels))
+    .filter((label) => map[label] && map[label].length)
+    .map((label) => `${label}=${map[label].map(serializeHotkeyToken).join("/")}`)
+    .join("; ");
+}
+
 const allSettingInputs = [
   levelSelect,
   responseStyleSelect,
@@ -1547,6 +1922,11 @@ const allSettingInputs = [
   blurLettersInput,
   letterBlurInput,
   hotkeysInput,
+  centerHotkeysInput,
+  combinedHotkeysInput,
+  directionHotkeysInput,
+  pauseHotkeyInput,
+  skipHotkeyInput,
   calmFieldInput,
   peripheralTargetInput,
   rangeSlider,
@@ -1565,6 +1945,17 @@ document.addEventListener("click", (event) => {
 calibrateButton.addEventListener("click", calibrateDisplay);
 resetButton.addEventListener("click", resetSession);
 pauseButton.addEventListener("click", togglePause);
+if (skipButton) skipButton.addEventListener("click", skipCurrentTrial);
+if (openHotkeyPanelButton) openHotkeyPanelButton.addEventListener("click", openHotkeyPanel);
+if (hotkeyCloseButton) hotkeyCloseButton.addEventListener("click", closeHotkeyPanel);
+if (hotkeyDoneButton) hotkeyDoneButton.addEventListener("click", closeHotkeyPanel);
+if (hotkeyResetButton) hotkeyResetButton.addEventListener("click", resetHotkeysToDefaults);
+if (hotkeyPanel) {
+  hotkeyPanel.addEventListener("click", (event) => {
+    if (event.target === hotkeyPanel) closeHotkeyPanel();
+  });
+}
+window.addEventListener("keydown", handleHotkeyCapture, true);
 stage.addEventListener("click", submitPeripheral);
 stage.addEventListener("mousemove", updateHoverDirection);
 stage.addEventListener("mouseleave", hideDirectionPreview);
@@ -1593,12 +1984,15 @@ allSettingInputs.forEach((input) => {
     saveSettings();
     updateLayout();
     applyCalmField();
+    applyHotkeyUiState();
+    renderHotkeyPanel();
   });
 });
 [levelSelect, autoProgressInput, trialsToCheckInput, targetAccuracyInput, regressAccuracyInput, directionCountInput, peripheralTargetInput].filter(Boolean).forEach((input) => {
   input.addEventListener("change", () => {
     resetProgressWindow();
     updateStats();
+    renderHotkeyPanel();
   });
 });
 rangeSlider.addEventListener("input", () => {
@@ -1622,17 +2016,22 @@ resetSettingsButton.addEventListener("click", () => {
     startDurationInput: "500",
     minDurationInput: "16",
     maxDurationInput: "500",
-    fixationInput: "800",
+    fixationInput: "600",
     maskInput: "90",
     symbolMaskInput: true,
     maskDensityInput: "140",
     correctDelayInput: "650",
-    missDelayInput: "1000",
+    missDelayInput: "650",
     targetSymbolInput: "✕",
     distractorSymbolInput: "Y",
     blurLettersInput: false,
     letterBlurInput: "2.5",
     hotkeysInput: true,
+    centerHotkeysInput: "A,D",
+    combinedHotkeysInput: "7,8,9,4,5,6,1,2,3,0",
+    directionHotkeysInput: DEFAULT_DIRECTION_HOTKEYS,
+    pauseHotkeyInput: DEFAULT_PAUSE_HOTKEY,
+    skipHotkeyInput: DEFAULT_SKIP_HOTKEY,
     calmFieldInput: false,
     rangeSlider: "78",
     peripheralTargetInput: "1",
@@ -1651,6 +2050,9 @@ resetSettingsButton.addEventListener("click", () => {
   state.duration = Number(defaults.startDurationInput);
   saveFlashDuration();
   updateLayout();
+  applyCalmField();
+  applyHotkeyUiState();
+  renderHotkeyPanel();
   updateStats();
   saveSettings();
 });
@@ -1697,6 +2099,8 @@ applySettingExplainers();
 loadSettings();
 updateLayout();
 applyCalmField();
+applyHotkeyUiState();
+renderHotkeyPanel();
 initializeTimerControls();
 initializeMobileWarning();
 updateStats();
