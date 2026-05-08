@@ -7,6 +7,9 @@ window.UFOVProgress = (() => {
   let chartTooltip = null;
   let chartHoverPoints = [];
 
+  const CHART_Y_MIN = -5;
+  const CHART_Y_MAX = 105;
+
   function loadHistory() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -220,6 +223,12 @@ window.UFOVProgress = (() => {
     if (canvas.height !== height) canvas.height = height;
   }
 
+  function percentToChartY(value, padding, chartHeight) {
+    const safeValue = clamp(Number(value), CHART_Y_MIN, CHART_Y_MAX);
+    const normalized = (safeValue - CHART_Y_MIN) / (CHART_Y_MAX - CHART_Y_MIN);
+    return padding.top + chartHeight - normalized * chartHeight;
+  }
+
   function renderChart(history) {
     const canvas = document.getElementById("progressCanvas");
     const summary = document.getElementById("chartSummary");
@@ -270,23 +279,24 @@ window.UFOVProgress = (() => {
 
     const difficultyPoints = data.map((row, index) => {
       const x = padding.left + (index / (data.length - 1)) * chartWidth;
-      const normalized = difficultyScore(row, chartState.current) / 100;
-      const y = padding.top + chartHeight - normalized * chartHeight;
+      const value = difficultyScore(row, chartState.current);
+      const y = percentToChartY(value, padding, chartHeight);
+
       return {
         x,
         y,
         row,
         index,
         metric: "Difficulty",
-        value: difficultyScore(row, chartState.current)
+        value
       };
     });
 
     const accuracyPoints = data.map((row, index) => {
       const x = padding.left + (index / (data.length - 1)) * chartWidth;
       const value = Number(row.accuracy) || 0;
-      const normalized = clamp(value / 100, 0, 1);
-      const y = padding.top + chartHeight - normalized * chartHeight;
+      const y = percentToChartY(value, padding, chartHeight);
+
       return { x, y, row, index, metric: "Accuracy", value };
     });
 
@@ -523,13 +533,14 @@ window.UFOVProgress = (() => {
     ctx.strokeStyle = "rgba(255,255,255,0.08)";
     ctx.lineWidth = 1;
 
-    for (let i = 0; i <= 4; i += 1) {
-      const y = padding.top + (chartHeight / 4) * i;
+    [100, 75, 50, 25, 0].forEach((value) => {
+      const y = percentToChartY(value, padding, chartHeight);
+
       ctx.beginPath();
       ctx.moveTo(padding.left, y);
       ctx.lineTo(padding.left + chartWidth, y);
       ctx.stroke();
-    }
+    });
 
     ctx.strokeStyle = "rgba(255,255,255,0.18)";
     ctx.beginPath();
@@ -545,11 +556,10 @@ window.UFOVProgress = (() => {
     ctx.fillStyle = "#a8a29e";
     ctx.textAlign = "right";
 
-    for (let i = 0; i <= 4; i += 1) {
-      const y = padding.top + (chartHeight / 4) * i;
-      const value = 100 - 25 * i;
+    [100, 75, 50, 25, 0].forEach((value) => {
+      const y = percentToChartY(value, padding, chartHeight);
       ctx.fillText(`${value}%`, padding.left - 14, y + 5);
-    }
+    });
 
     ctx.textAlign = "left";
   }
@@ -558,8 +568,7 @@ window.UFOVProgress = (() => {
   }
 
   function drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, value, color, label) {
-    const normalized = clamp(Number(value) / 100, 0, 1);
-    const y = padding.top + chartHeight - normalized * chartHeight;
+    const y = percentToChartY(value, padding, chartHeight);
 
     ctx.save();
     ctx.strokeStyle = color;
