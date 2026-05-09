@@ -132,8 +132,11 @@
         </div>
 
         <div class="settings-grid">
-          <label class="wide">
-            Peripheral range
+          <label class="wide range-setting">
+            <span class="setting-heading">
+              <span>Peripheral range</span>
+              <output id="rangeSliderValue" class="range-value" for="rangeSlider">78%</output>
+            </span>
             <input type="range" id="rangeSlider" min="36" max="98" value="78" />
           </label>
 
@@ -156,7 +159,7 @@
 
           <label id="choiceCountLabel" class="hidden">
             Choice count
-            <input type="number" id="choiceCountInput" min="2" max="10" value="10" />
+            <input type="number" id="choiceCountInput" min="2" max="16" value="10" />
           </label>
 
           <label>

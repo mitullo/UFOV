@@ -38,6 +38,7 @@ const choiceCountInput = document.getElementById("choiceCountInput");
 const autoProgressInput = document.getElementById("autoProgressInput");
 const trialsToCheckInput = document.getElementById("trialsToCheckInput");
 const rangeSlider = document.getElementById("rangeSlider");
+const rangeSliderValue = document.getElementById("rangeSliderValue");
 const targetAccuracyInput = document.getElementById("targetAccuracyInput");
 const regressAccuracyInput = document.getElementById("regressAccuracyInput");
 const startDurationInput = document.getElementById("startDurationInput");
@@ -118,6 +119,7 @@ let activeSession = null;
 let countdownTimer = null;
 let hoverDirection = null;
 let activeHotkeyCapture = null;
+let combinedArmedSlotIndex = null;
 
 function createInitialState() {
   const settings = getSettings();
@@ -171,7 +173,7 @@ function getSettings() {
     responseStyle: responseStyleSelect ? responseStyleSelect.value : "twoStep",
     stimulusArea: stimulusAreaSelect ? stimulusAreaSelect.value : "circle",
     directionCount,
-    choiceCount: readNumber(choiceCountInput, 10, 2, 10),
+    choiceCount: readNumber(choiceCountInput, 10, 2, 16),
     autoProgress: autoProgressInput.checked,
     trialsToCheck: readNumber(trialsToCheckInput, 4, 1, 40),
     targetAccuracy: readNumber(targetAccuracyInput, 75, 50, 98) / 100,
@@ -1229,6 +1231,7 @@ function clearStage() {
   centerStimulus.classList.remove("visible");
   hideMask();
   hideDirectionPreview();
+  clearCombinedArmedSlot();
   stage.classList.remove("selecting-location");
   removeSectors();
   removeSelectedSectorMarks();
@@ -1372,23 +1375,27 @@ function presentResponseControls() {
 
 function presentCombinedChoices() {
   responseLock = false;
+  combinedArmedSlotIndex = null;
   responseOverlay.classList.add("visible");
   responseOverlay.classList.remove("peripheral-chooser");
   responseOverlay.classList.add("combined-mode");
   choiceRow.classList.add("combined");
   promptText.className = "";
-  promptText.textContent = "Pick the emoji and location.";
-  feedbackText.textContent = getSettings().hotkeys ? "Use hotkeys for fast reps." : "Click the matching card.";
+  promptText.textContent = "Pick the location, then the emoji.";
+  feedbackText.textContent = getSettings().hotkeys
+    ? "Click an emoji, or press a location key then A/D."
+    : "Click the emoji inside the matching location.";
   choiceRow.innerHTML = "";
-  const choices = buildCombinedChoices();
-  const configuredHotkeys = getSettings().combinedChoiceHotkeys;
-  const hotkeys = Array.from({ length: choices.length }, (_, index) => configuredHotkeys[index] || DEFAULT_COMBINED_CHOICE_HOTKEYS[index] || String(index + 1));
-  const visibleSlotCount = Math.max(choices.length, hotkeys.length);
 
-  for (let index = 0; index < visibleSlotCount; index += 1) {
-    const choice = choices[index];
-    const gridArea = getCombinedChoiceGridArea(index);
-    if (!choice) {
+  const choices = buildCombinedChoices();
+  const groups = groupCombinedChoicesBySlot(choices);
+  const spatialSlotCount = 9;
+
+  for (let slotIndex = 0; slotIndex < spatialSlotCount; slotIndex += 1) {
+    const group = groups.get(slotIndex) || [];
+    const gridArea = getCombinedChoiceGridArea(slotIndex);
+
+    if (!group.length) {
       const placeholder = document.createElement("div");
       placeholder.className = "combined-choice-placeholder";
       placeholder.style.gridArea = gridArea;
@@ -1396,27 +1403,44 @@ function presentCombinedChoices() {
       continue;
     }
 
-    const button = document.createElement("button");
-    button.className = "combined-choice";
-    button.type = "button";
-    const hotkey = hotkeys[index];
-    button.dataset.hotkey = hotkey;
-    button.dataset.hotkeyIndex = String(index);
-    button.style.gridArea = gridArea;
-    button.title = `Hotkey ${displayHotkey(hotkey)}`;
-    renderCombinedChoice(button, choice, hotkey);
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      submitCombinedChoice(choice);
+    const slot = document.createElement("div");
+    slot.className = "combined-answer-slot";
+    slot.dataset.slotIndex = String(slotIndex);
+    slot.dataset.stackSize = String(group.length);
+    slot.style.gridArea = gridArea;
+
+    const orderedGroup = orderCombinedChoicesForSlot(group);
+    const slotHotkey = getCombinedSlotHotkey(slotIndex);
+    renderCombinedSlotPreview(slot, orderedGroup[0], slotHotkey);
+
+    const buttonRow = document.createElement("div");
+    buttonRow.className = "combined-emoji-row";
+
+    orderedGroup.forEach((choice, groupIndex) => {
+      const button = document.createElement("button");
+      button.className = "combined-emoji-choice";
+      button.type = "button";
+      const emojiHotkey = getCombinedEmojiHotkey(groupIndex);
+      button.dataset.combinedSlot = String(slotIndex);
+      button.dataset.emojiIndex = String(groupIndex);
+      button.title = `Click or press ${displayHotkey(emojiHotkey)}`;
+      renderCombinedEmojiChoice(button, choice, emojiHotkey);
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        submitCombinedChoice(choice);
+      });
+      buttonRow.appendChild(button);
     });
-    choiceRow.appendChild(button);
+
+    slot.appendChild(buttonRow);
+    choiceRow.appendChild(slot);
   }
-}
+ }
 
 function buildCombinedChoices() {
   const settings = getSettings();
-  const count = Math.min(settings.choiceCount, 10);
+  const count = Math.min(settings.choiceCount, 16);
   const correctDirections = state.current.directions || [state.current.direction];
   const targetCount = getRequiredPeripheralCount();
   const choices = [];
@@ -1500,6 +1524,132 @@ function getCombinedChoiceGridArea(index) {
   return areas[index] || areas[areas.length - 1];
 }
 
+function getCombinedChoiceSlotIndex(choice) {
+  const direction = getCombinedChoicePrimaryDirection(choice);
+  const slot = getCombinedChoiceGridSlot(direction);
+  return (slot.row - 1) * 3 + (slot.column - 1);
+}
+
+function groupCombinedChoicesBySlot(choices) {
+  const groups = new Map();
+  choices.forEach((choice) => {
+    const slotIndex = getCombinedChoiceSlotIndex(choice);
+    if (!groups.has(slotIndex)) groups.set(slotIndex, []);
+    groups.get(slotIndex).push(choice);
+  });
+  return groups;
+}
+
+function orderCombinedChoicesForSlot(choices) {
+  return shuffle(choices);
+}
+
+function getCombinedSlotHotkey(slotIndex) {
+  const configured = getSettings().combinedChoiceHotkeys;
+  return configured[slotIndex] || DEFAULT_COMBINED_CHOICE_HOTKEYS[slotIndex] || String(slotIndex + 1);
+}
+
+function getCombinedEmojiHotkey(index) {
+  const hotkeys = getSettings().centerChoiceHotkeys;
+  return hotkeys[index] || String(index + 1);
+}
+
+function renderCombinedSlotPreview(slot, choice, slotHotkey) {
+  const preview = document.createElement("div");
+  preview.className = `mini-stage combined-slot-preview ${getSettings().stimulusArea === "full" ? "full-field" : ""}`;
+  choice.directions.forEach((direction) => {
+    const sector = document.createElement("span");
+    sector.className = "mini-sector";
+    sector.style.setProperty("--sector-width", `${getSectorWidth()}deg`);
+    sector.style.setProperty("--sector-offset", `${-getSectorWidth() / 2}deg`);
+    sector.style.transform = `translate(-50%, -50%) rotate(${90 - direction.angle}deg)`;
+    preview.appendChild(sector);
+  });
+
+  const centerMarker = document.createElement("span");
+  centerMarker.className = "mini-center combined-location-dot";
+  centerMarker.textContent = "+";
+  preview.appendChild(centerMarker);
+
+  const label = document.createElement("div");
+  label.className = "combined-slot-label";
+  label.innerHTML = `<span>${choice.directions.map((direction) => direction.label).join("+")}</span><span class="hotkey-hint">${displayHotkey(slotHotkey)}</span>`;
+
+  slot.appendChild(preview);
+  slot.appendChild(label);
+}
+
+function renderCombinedEmojiChoice(button, choice, emojiHotkey) {
+  const emoji = document.createElement("span");
+  emoji.className = "combined-emoji";
+  emoji.textContent = choice.center;
+
+  const hint = document.createElement("span");
+  hint.className = "hotkey-hint";
+  hint.textContent = displayHotkey(emojiHotkey);
+
+  button.appendChild(emoji);
+  button.appendChild(hint);
+}
+
+function getCombinedSlotIndexFromHotkey(event) {
+  const hotkeys = Array.from({ length: 9 }, (_, index) => getCombinedSlotHotkey(index));
+  return findHotkeyIndex(event, hotkeys);
+}
+
+function getCombinedSlotButtons(slotIndex) {
+  return Array.from(choiceRow.querySelectorAll(`.combined-emoji-choice[data-combined-slot="${slotIndex}"]`));
+}
+
+function clearCombinedArmedSlot() {
+  combinedArmedSlotIndex = null;
+  choiceRow.querySelectorAll(".combined-answer-slot.keyboard-armed").forEach((slot) => {
+    slot.classList.remove("keyboard-armed");
+  });
+}
+
+function armCombinedSlot(slotIndex) {
+  clearCombinedArmedSlot();
+  combinedArmedSlotIndex = slotIndex;
+  const slot = choiceRow.querySelector(`.combined-answer-slot[data-slot-index="${slotIndex}"]`);
+  if (slot) slot.classList.add("keyboard-armed");
+
+  const labels = getCombinedSlotButtons(slotIndex)
+    .map((button, index) => `${displayHotkey(getCombinedEmojiHotkey(index))} ${button.querySelector(".combined-emoji")?.textContent || ""}`)
+    .join(" · ");
+  feedbackText.textContent = labels ? `Location selected. Press ${labels}.` : "Location selected.";
+}
+
+function handleCombinedChoiceHotkey(event) {
+  const emojiHotkeyIndex = combinedArmedSlotIndex !== null
+    ? findHotkeyIndex(event, getSettings().centerChoiceHotkeys)
+    : -1;
+
+  if (combinedArmedSlotIndex !== null && emojiHotkeyIndex >= 0) {
+    const buttons = getCombinedSlotButtons(combinedArmedSlotIndex);
+    const button = buttons[emojiHotkeyIndex];
+    if (!button) return false;
+    clearCombinedArmedSlot();
+    button.click();
+    return true;
+  }
+
+  const slotIndex = getCombinedSlotIndexFromHotkey(event);
+  if (slotIndex < 0) return false;
+
+  const buttons = getCombinedSlotButtons(slotIndex);
+  if (!buttons.length) return false;
+
+  if (buttons.length === 1) {
+    clearCombinedArmedSlot();
+    buttons[0].click();
+    return true;
+  }
+
+  armCombinedSlot(slotIndex);
+  return true;
+}
+
 function randomDirectionSet(count, avoid = []) {
   const avoidKey = directionSetKey(avoid);
   const directions = getDirections();
@@ -1534,6 +1684,7 @@ function renderCombinedChoice(button, choice, hotkey) {
 
 function submitCombinedChoice(choice) {
   if (responseLock) return;
+  clearCombinedArmedSlot();
   state.response.center = choice.center;
   state.response.peripherals = choice.directions;
   finishTrial();
@@ -1739,6 +1890,7 @@ function finishTrial() {
   responseLock = true;
   state.skippable = false;
   hideDirectionPreview();
+  clearCombinedArmedSlot();
   stage.classList.remove("selecting-location");
   responseOverlay.classList.remove("visible", "peripheral-chooser");
   state.awaitingPeripheral = false;
@@ -1913,11 +2065,13 @@ function hideDirectionPreview() {
 function handleChoiceHotkey(event) {
   if (!getSettings().hotkeys) return false;
   if (responseLock) return false;
+
+  if (responseOverlay.classList.contains("combined-mode")) {
+    return handleCombinedChoiceHotkey(event);
+  }
+
   const settings = getSettings();
-  const hotkeys = responseOverlay.classList.contains("combined-mode")
-    ? settings.combinedChoiceHotkeys
-    : settings.centerChoiceHotkeys;
-  const index = findHotkeyIndex(event, hotkeys);
+  const index = findHotkeyIndex(event, settings.centerChoiceHotkeys);
   if (index < 0) return false;
   const button = choiceRow.querySelector(`[data-hotkey-index="${index}"]`);
   if (!button) return false;
@@ -2075,6 +2229,26 @@ function applySettingExplainers() {
     const label = input.closest("label");
     if (label) label.title = text;
   });
+}
+
+function updateRangeSliderValue() {
+  if (!rangeSlider) return;
+
+  const min = Number(rangeSlider.min) || 0;
+  const max = Number(rangeSlider.max) || 100;
+  const rawValue = Number(rangeSlider.value);
+  const value = clamp(Number.isFinite(rawValue) ? rawValue : 78, min, max);
+  const progress = max > min ? ((value - min) / (max - min)) * 100 : 0;
+  const rounded = Math.round(value);
+
+  rangeSlider.style.setProperty("--range-fill", `${clamp(progress, 0, 100)}%`);
+  rangeSlider.setAttribute("aria-valuetext", `${rounded}% peripheral range`);
+  rangeSlider.title = `Peripheral range: ${rounded}%`;
+
+  if (rangeSliderValue) {
+    rangeSliderValue.value = `${rounded}%`;
+    rangeSliderValue.textContent = `${rounded}%`;
+  }
 }
 
 function applyInputSteps() {
@@ -2330,6 +2504,7 @@ allSettingInputs.forEach((input) => {
   input.addEventListener("change", () => {
     saveSettings();
     updateLayout();
+    updateRangeSliderValue();
     applyCalmField();
     applyHotkeyUiState();
     renderHotkeyPanel();
@@ -2345,6 +2520,7 @@ allSettingInputs.forEach((input) => {
 rangeSlider.addEventListener("input", () => {
   saveSettings();
   updateLayout();
+  updateRangeSliderValue();
 });
 window.addEventListener("resize", updateLayout);
 resetSettingsButton.addEventListener("click", () => {
@@ -2444,6 +2620,7 @@ function applyCalmField() {
 applyInputSteps();
 applySettingExplainers();
 loadSettings();
+updateRangeSliderValue();
 updateLayout();
 applyCalmField();
 applyHotkeyUiState();
