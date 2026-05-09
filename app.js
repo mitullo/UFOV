@@ -57,6 +57,10 @@ const letterBlurInput = document.getElementById("letterBlurInput");
 const hotkeysInput = document.getElementById("hotkeysInput");
 const centerHotkeysInput = document.getElementById("centerHotkeysInput");
 const combinedHotkeysInput = document.getElementById("combinedHotkeysInput");
+const oneHandEmojiHotkeysInput = document.getElementById("oneHandEmojiHotkeysInput");
+const oneHandCenterSubmitHotkeyInput = document.getElementById("oneHandCenterSubmitHotkeyInput");
+const oneHandClockwiseHotkeyInput = document.getElementById("oneHandClockwiseHotkeyInput");
+const oneHandCounterClockwiseHotkeyInput = document.getElementById("oneHandCounterClockwiseHotkeyInput");
 const directionHotkeysInput = document.getElementById("directionHotkeysInput");
 const pauseHotkeyInput = document.getElementById("pauseHotkeyInput");
 const skipHotkeyInput = document.getElementById("skipHotkeyInput");
@@ -99,6 +103,10 @@ const TRIAL_GOAL_STATE_KEY = "ufov_trial_goal_state";
 const MOBILE_WARNING_SESSION_KEY = "ufov_mobile_warning_seen";
 const DEFAULT_CENTER_CHOICE_HOTKEYS = ["A", "D"];
 const DEFAULT_COMBINED_CHOICE_HOTKEYS = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "0"];
+const DEFAULT_ONE_HAND_EMOJI_HOTKEYS = ["S"];
+const DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY = "D";
+const DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY = "R";
+const DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY = "F";
 const DEFAULT_DIRECTION_HOTKEYS = "E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C";
 const DEFAULT_PAUSE_HOTKEY = "Space";
 const DEFAULT_SKIP_HOTKEY = "Backspace";
@@ -119,6 +127,8 @@ let activeSession = null;
 let countdownTimer = null;
 let hoverDirection = null;
 let activeHotkeyCapture = null;
+let oneHandResponse = createOneHandResponseState();
+let activeOneHandRefine = null;
 let combinedArmedSlotIndex = null;
 
 function createInitialState() {
@@ -163,6 +173,17 @@ function createTrialGoalState() {
   };
 }
 
+function createOneHandResponseState() {
+  return {
+    active: false,
+    centerChoices: [],
+    selectedCenter: null,
+    selectedCenterIndex: -1,
+    selectedDirections: [],
+    requiredDirections: 0
+  };
+}
+
 function getSettings() {
   const minimum = readNumber(minDurationInput, 16, 4, 100);
   const maximum = Math.max(readNumber(maxDurationInput, 500, 50, 1500), minimum);
@@ -197,6 +218,10 @@ function getSettings() {
     hotkeys: hotkeysInput ? hotkeysInput.checked : true,
     centerChoiceHotkeys: parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS),
     combinedChoiceHotkeys: parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS),
+    oneHandEmojiHotkeys: parseHotkeyList(oneHandEmojiHotkeysInput, DEFAULT_ONE_HAND_EMOJI_HOTKEYS),
+    oneHandCenterSubmitHotkey: readHotkey(oneHandCenterSubmitHotkeyInput, DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY),
+    oneHandClockwiseHotkey: readHotkey(oneHandClockwiseHotkeyInput, DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY),
+    oneHandCounterClockwiseHotkey: readHotkey(oneHandCounterClockwiseHotkeyInput, DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY),
     directionHotkeyMap: parseDirectionHotkeyMap(directionHotkeysInput ? directionHotkeysInput.value : DEFAULT_DIRECTION_HOTKEYS),
     pauseHotkey: readHotkey(pauseHotkeyInput, DEFAULT_PAUSE_HOTKEY),
     skipHotkey: readHotkey(skipHotkeyInput, DEFAULT_SKIP_HOTKEY),
@@ -1240,6 +1265,7 @@ function clearStage() {
   occupiedStimulusPoints = [];
   peripheralElements = [];
   decoyElements = [];
+  resetOneHandResponse();
   responseLock = true;
 }
 
@@ -1337,12 +1363,17 @@ function presentResponseControls() {
   setTrialCursorHidden(false);
   const fixation = document.getElementById("fixation");
   if (fixation) fixation.classList.add("hidden");
-  if (state.level >= 2 && getSettings().responseStyle === "combined") {
+  const responseStyle = getSettings().responseStyle;
+  if (responseStyle === "oneHand") {
+    presentOneHandResponse();
+    return;
+  }
+  if (state.level >= 2 && responseStyle === "combined") {
     presentCombinedChoices();
     return;
   }
-  responseOverlay.classList.remove("combined-mode");
-  choiceRow.classList.remove("combined");
+  responseOverlay.classList.remove("combined-mode", "one-hand-mode");
+  choiceRow.classList.remove("combined", "one-hand");
   responseLock = false;
   responseOverlay.classList.add("visible");
   responseOverlay.classList.remove("feedback-mode", "peripheral-chooser");
@@ -1377,8 +1408,9 @@ function presentCombinedChoices() {
   responseLock = false;
   combinedArmedSlotIndex = null;
   responseOverlay.classList.add("visible");
-  responseOverlay.classList.remove("peripheral-chooser");
+  responseOverlay.classList.remove("peripheral-chooser", "one-hand-mode");
   responseOverlay.classList.add("combined-mode");
+  choiceRow.classList.remove("one-hand");
   choiceRow.classList.add("combined");
   promptText.className = "";
   promptText.textContent = "Pick the location, then the emoji.";
@@ -1437,6 +1469,341 @@ function presentCombinedChoices() {
     choiceRow.appendChild(slot);
   }
  }
+
+function presentOneHandResponse() {
+  responseLock = false;
+  oneHandResponse = createOneHandResponseState();
+  oneHandResponse.active = true;
+  oneHandResponse.centerChoices = shuffle([state.current.center, state.current.decoy]);
+  oneHandResponse.requiredDirections = state.level >= 2 ? getRequiredPeripheralCount() : 0;
+  activeOneHandRefine = null;
+
+  responseOverlay.classList.add("visible", "one-hand-mode");
+  responseOverlay.classList.remove("combined-mode", "peripheral-chooser", "feedback-mode");
+  choiceRow.classList.remove("combined");
+  choiceRow.classList.add("one-hand");
+  promptText.className = "";
+  promptText.textContent = state.level === 1 ? "Cycle to the center emoji." : "Cycle emoji, then tap direction.";
+  feedbackText.textContent = getOneHandInstructionText();
+  choiceRow.innerHTML = "";
+
+  renderOneHandBoard();
+}
+
+function resetOneHandResponse() {
+  oneHandResponse = createOneHandResponseState();
+  activeOneHandRefine = null;
+  if (choiceRow) {
+    choiceRow.classList.remove("one-hand", "one-hand-refine-clockwise", "one-hand-refine-counter");
+    delete choiceRow.dataset.refine;
+    delete choiceRow.dataset.centerIndex;
+  }
+  if (responseOverlay) responseOverlay.classList.remove("one-hand-mode");
+}
+
+function getOneHandInstructionText() {
+  const settings = getSettings();
+  const cycleKey = displayHotkey(settings.oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0]);
+  if (state.level === 1) return `${cycleKey} cycles emoji · ${displayHotkey(settings.oneHandCenterSubmitHotkey)} confirms`;
+
+  const targetCount = getRequiredPeripheralCount();
+  const refineText = getDirections().length > 8
+    ? ` · ${displayHotkey(settings.oneHandCounterClockwiseHotkey)}/${displayHotkey(settings.oneHandClockwiseHotkey)} refine` 
+    : "";
+  return `${cycleKey} cycles emoji · QWE/AD/ZXC choose direction${refineText}${targetCount > 1 ? ` · ${targetCount} targets` : ""}`;
+}
+
+function getOneHandRefineIconSvg(mode) {
+  const clockwise = mode === "clockwise";
+  const arc = clockwise
+    ? "M 11.2 7.4 A 9.8 9.8 0 1 1 8.2 15.3"
+    : "M 20.8 7.4 A 9.8 9.8 0 1 0 23.8 15.3";
+  const arrow = clockwise
+    ? "M 11.2 7.4 H 18.2 V 14.4"
+    : "M 20.8 7.4 H 13.8 V 14.4";
+
+  return `
+    <svg class="one-hand-refine-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <path class="one-hand-refine-arc" d="${arc}" />
+      <path class="one-hand-refine-arrow" d="${arrow}" />
+    </svg>
+  `;
+}
+
+function renderOneHandBoard() {
+  choiceRow.innerHTML = "";
+  const settings = getSettings();
+  const board = document.createElement("div");
+  board.className = "one-hand-board";
+
+  const emojiRow = document.createElement("div");
+  emojiRow.className = "one-hand-emoji-row";
+  const cycleKey = settings.oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0];
+  oneHandResponse.centerChoices.forEach((choice, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "one-hand-emoji-choice";
+    button.dataset.oneHandCenterIndex = String(index);
+    button.dataset.hotkey = cycleKey;
+    button.title = `${displayHotkey(cycleKey)} cycle ${index + 1}`;
+    button.innerHTML = `<strong>${choice}</strong><span>${index === 0 ? displayHotkey(cycleKey) : `${displayHotkey(cycleKey)}×${index + 1}`}</span>`;
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectOneHandCenterByIndex(index);
+    });
+    emojiRow.appendChild(button);
+  });
+  board.appendChild(emojiRow);
+
+  if (state.level >= 2) {
+    const directionMap = document.createElement("div");
+    directionMap.className = "one-hand-direction-map";
+    getOneHandDirectionSlots().forEach((slot) => {
+      if (!slot) {
+        const gap = document.createElement("div");
+        gap.className = "one-hand-direction-gap";
+        directionMap.appendChild(gap);
+        return;
+      }
+
+      const direction = nearestDirectionByAngle(slot.angle);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "one-hand-direction-key";
+      button.dataset.directionIndex = String(direction.index);
+      button.innerHTML = `<strong>${slot.key}</strong><span>${direction.label}</span>`;
+      button.title = direction.name;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        submitOneHandDirection(direction);
+      });
+      directionMap.appendChild(button);
+    });
+    board.appendChild(directionMap);
+
+    if (getDirections().length > 8) {
+      const refineRow = document.createElement("div");
+      refineRow.className = "one-hand-refine-row";
+      [
+        { mode: "counterClockwise", hotkey: settings.oneHandCounterClockwiseHotkey, label: "Counter-clockwise half-step" },
+        { mode: "clockwise", hotkey: settings.oneHandClockwiseHotkey, label: "Clockwise half-step" }
+      ].forEach((option) => {
+        const chip = document.createElement("div");
+        chip.className = "one-hand-refine-chip";
+        chip.dataset.refineMode = option.mode;
+        chip.setAttribute("role", "img");
+        chip.setAttribute("aria-label", `${displayHotkey(option.hotkey)} ${option.label}`);
+        chip.title = `${displayHotkey(option.hotkey)} · ${option.label}`;
+        chip.innerHTML = `${getOneHandRefineIconSvg(option.mode)}<span>${displayHotkey(option.hotkey)}</span>`;
+        refineRow.appendChild(chip);
+      });
+      board.appendChild(refineRow);
+    }
+  }
+
+  choiceRow.appendChild(board);
+  updateOneHandVisualState();
+}
+
+function getOneHandDirectionSlots() {
+  const cardinalSlots = [
+    null, { key: "W", angle: 90 }, null,
+    { key: "A", angle: 180 }, null, { key: "D", angle: 0 },
+    null, { key: "X", angle: 270 }, null
+  ];
+  if (getDirections().length <= 4) return cardinalSlots;
+
+  return [
+    { key: "Q", angle: 135 }, { key: "W", angle: 90 }, { key: "E", angle: 45 },
+    { key: "A", angle: 180 }, null, { key: "D", angle: 0 },
+    { key: "Z", angle: 225 }, { key: "X", angle: 270 }, { key: "C", angle: 315 }
+  ];
+}
+
+function nearestDirectionByAngle(angle) {
+  const normalized = ((angle % 360) + 360) % 360;
+  return getDirections().reduce((best, direction) => {
+    const delta = Math.abs(direction.angle - normalized);
+    const distance = Math.min(delta, 360 - delta);
+    return distance < best.distance ? { direction, distance } : best;
+  }, { direction: getDirections()[0], distance: Infinity }).direction;
+}
+
+function getOneHandKeyboardBaseAngle(event) {
+  if (getDirections().length <= 4 && ["KeyQ", "KeyE", "KeyZ", "KeyC"].includes(event.code)) return null;
+
+  const keyMap = {
+    KeyD: 0,
+    KeyE: 45,
+    KeyW: 90,
+    KeyQ: 135,
+    KeyA: 180,
+    KeyZ: 225,
+    KeyX: 270,
+    KeyC: 315
+  };
+  if (event.code in keyMap) return keyMap[event.code];
+  return null;
+}
+
+function oneHandDirectionFromKeyboard(event) {
+  const baseAngle = getOneHandKeyboardBaseAngle(event);
+  if (baseAngle === null) return null;
+
+  let angle = baseAngle;
+  const directions = getDirections();
+  if (directions.length > 8 && activeOneHandRefine) {
+    const step = 360 / directions.length;
+    angle += activeOneHandRefine === "clockwise" ? -step : step;
+  }
+
+  return nearestDirectionByAngle(angle);
+}
+
+function cycleOneHandCenter() {
+  if (!oneHandResponse.active || responseLock || !oneHandResponse.centerChoices.length) return;
+  const nextIndex = oneHandResponse.selectedCenterIndex < 0
+    ? 0
+    : (oneHandResponse.selectedCenterIndex + 1) % oneHandResponse.centerChoices.length;
+  selectOneHandCenterByIndex(nextIndex);
+}
+
+function selectOneHandCenterByIndex(index) {
+  if (!oneHandResponse.active || responseLock) return;
+  const safeIndex = clamp(Math.round(index), 0, oneHandResponse.centerChoices.length - 1);
+  const choice = oneHandResponse.centerChoices[safeIndex];
+  if (!choice) return;
+
+  oneHandResponse.selectedCenterIndex = safeIndex;
+  oneHandResponse.selectedCenter = choice;
+  state.response.center = choice;
+
+  if (state.level === 1) {
+    promptText.textContent = "Confirm the center emoji.";
+    feedbackText.textContent = `${displayHotkey(getSettings().oneHandCenterSubmitHotkey)} confirms · ${displayHotkey(getSettings().oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0])} switches`;
+  } else {
+    promptText.textContent = "Tap the target direction.";
+    const count = oneHandResponse.requiredDirections;
+    const chosen = oneHandResponse.selectedDirections.length;
+    feedbackText.textContent = count > 1 ? `${chosen}/${count} directions selected` : "Tap Q/W/E/A/D/Z/X/C.";
+  }
+
+  updateOneHandVisualState();
+}
+
+function confirmOneHandCenterOnly() {
+  if (!oneHandResponse.active || responseLock || state.level !== 1) return false;
+  if (!oneHandResponse.selectedCenter) cycleOneHandCenter();
+  if (!oneHandResponse.selectedCenter) return false;
+  finishTrial();
+  return true;
+}
+
+function submitOneHandCenter(choice) {
+  const index = oneHandResponse.centerChoices.indexOf(choice);
+  selectOneHandCenterByIndex(index >= 0 ? index : 0);
+}
+
+function submitOneHandDirection(direction) {
+  if (!oneHandResponse.active || responseLock || state.level < 2) return;
+
+  if (!oneHandResponse.selectedCenter) {
+    promptText.textContent = "Press the emoji cycle key first.";
+    feedbackText.textContent = getOneHandInstructionText();
+    return;
+  }
+
+  const alreadySelected = oneHandResponse.selectedDirections.some((selected) => selected.index === direction.index);
+  if (!alreadySelected) oneHandResponse.selectedDirections.push(direction);
+  else if (oneHandResponse.requiredDirections > 1) {
+    oneHandResponse.selectedDirections = oneHandResponse.selectedDirections.filter((selected) => selected.index !== direction.index);
+  }
+
+  state.response.peripherals = oneHandResponse.selectedDirections.slice(0, oneHandResponse.requiredDirections);
+  updateOneHandVisualState();
+
+  const selectedCount = state.response.peripherals.length;
+  if (selectedCount >= oneHandResponse.requiredDirections) {
+    finishTrial();
+    return;
+  }
+
+  promptText.textContent = "Tap the next target direction.";
+  feedbackText.textContent = `${selectedCount}/${oneHandResponse.requiredDirections} directions selected`;
+}
+
+function updateOneHandVisualState() {
+  if (!choiceRow) return;
+  const settings = getSettings();
+  if (oneHandResponse.selectedCenterIndex >= 0) choiceRow.dataset.centerIndex = String(oneHandResponse.selectedCenterIndex);
+  else delete choiceRow.dataset.centerIndex;
+
+  choiceRow.querySelectorAll(".one-hand-emoji-choice").forEach((button) => {
+    const index = Number(button.dataset.oneHandCenterIndex);
+    button.classList.toggle("selected", index === oneHandResponse.selectedCenterIndex);
+  });
+
+  const selectedDirectionIndexes = new Set(oneHandResponse.selectedDirections.map((direction) => direction.index));
+  choiceRow.querySelectorAll(".one-hand-direction-key").forEach((button) => {
+    const directionIndex = Number(button.dataset.directionIndex);
+    button.classList.toggle("selected", selectedDirectionIndexes.has(directionIndex));
+  });
+
+  choiceRow.classList.toggle("one-hand-refine-clockwise", activeOneHandRefine === "clockwise");
+  choiceRow.classList.toggle("one-hand-refine-counter", activeOneHandRefine === "counterClockwise");
+
+  choiceRow.querySelectorAll(".one-hand-refine-chip").forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.refineMode === activeOneHandRefine);
+  });
+  delete choiceRow.dataset.refine;
+}
+
+function setOneHandRefineFromKeyboard(event, isDown) {
+  if (!oneHandResponse.active || !getSettings().hotkeys) return false;
+  const settings = getSettings();
+  if (eventMatchesHotkey(event, settings.oneHandClockwiseHotkey)) {
+    activeOneHandRefine = isDown ? "clockwise" : (activeOneHandRefine === "clockwise" ? null : activeOneHandRefine);
+    updateOneHandVisualState();
+    return true;
+  }
+  if (eventMatchesHotkey(event, settings.oneHandCounterClockwiseHotkey)) {
+    activeOneHandRefine = isDown ? "counterClockwise" : (activeOneHandRefine === "counterClockwise" ? null : activeOneHandRefine);
+    updateOneHandVisualState();
+    return true;
+  }
+  return false;
+}
+
+function handleOneHandHotkey(event) {
+  if (!oneHandResponse.active || responseLock) return false;
+  if (event.repeat && setOneHandRefineFromKeyboard(event, true)) return true;
+
+  const settings = getSettings();
+  if (findHotkeyIndex(event, settings.oneHandEmojiHotkeys) >= 0) {
+    cycleOneHandCenter();
+    return true;
+  }
+
+  if (state.level === 1 && eventMatchesHotkey(event, settings.oneHandCenterSubmitHotkey)) {
+    return confirmOneHandCenterOnly();
+  }
+
+  if (setOneHandRefineFromKeyboard(event, true)) return true;
+
+  const direction = oneHandDirectionFromKeyboard(event);
+  if (direction) {
+    submitOneHandDirection(direction);
+    return true;
+  }
+
+  return false;
+}
+
+function isOneHandResponseActive() {
+  return oneHandResponse.active && responseOverlay.classList.contains("one-hand-mode") && !responseLock;
+}
 
 function buildCombinedChoices() {
   const settings = getSettings();
@@ -1701,8 +2068,8 @@ function presentPeripheralChooser() {
   state.awaitingPeripheral = true;
   state.response.peripherals = [];
   responseLock = true;
-  responseOverlay.classList.remove("combined-mode");
-  choiceRow.classList.remove("combined");
+  responseOverlay.classList.remove("combined-mode", "one-hand-mode");
+  choiceRow.classList.remove("combined", "one-hand");
   choiceRow.innerHTML = "";
   responseOverlay.classList.remove("visible");
   responseOverlay.classList.add("peripheral-chooser");
@@ -1927,8 +2294,8 @@ function isPeripheralResponseCorrect() {
 }
 
 function showFeedback(correct, centerCorrect, peripheralCorrect) {
-  responseOverlay.classList.remove("combined-mode");
-  choiceRow.classList.remove("combined");
+  responseOverlay.classList.remove("combined-mode", "one-hand-mode");
+  choiceRow.classList.remove("combined", "one-hand");
   responseOverlay.classList.add("visible", "feedback-mode");
   promptText.innerHTML = correct ? "Correct" : "Incorrect";
   promptText.className = correct ? "feedback-title correct" : "feedback-title incorrect";
@@ -2066,8 +2433,18 @@ function handleChoiceHotkey(event) {
   if (!getSettings().hotkeys) return false;
   if (responseLock) return false;
 
+  if (responseOverlay.classList.contains("one-hand-mode")) {
+    return handleOneHandHotkey(event);
+  }
+
   if (responseOverlay.classList.contains("combined-mode")) {
-    return handleCombinedChoiceHotkey(event);
+    const variants = eventHotkeyVariants(event);
+    const button = Array.from(choiceRow.querySelectorAll("[data-hotkey]")).find((candidate) => {
+      return variants.has(normalizeHotkeyToken(candidate.dataset.hotkey));
+    });
+    if (!button) return false;
+    button.click();
+    return true;
   }
 
   const settings = getSettings();
@@ -2140,6 +2517,10 @@ function handleKeyboard(event) {
     if (event.key === "Escape") closeHotkeyPanel();
     return;
   }
+  if (settings.hotkeys && isOneHandResponseActive() && handleChoiceHotkey(event)) {
+    event.preventDefault();
+    return;
+  }
   if (settings.hotkeys && eventMatchesHotkey(event, settings.pauseHotkey)) {
     event.preventDefault();
     if (state.running) togglePause();
@@ -2167,6 +2548,12 @@ function handleKeyboard(event) {
   submitPeripheralDirection(direction);
 }
 
+function handleKeyboardKeyup(event) {
+  if (isOneHandResponseActive() && setOneHandRefineFromKeyboard(event, false)) {
+    event.preventDefault();
+  }
+}
+
 function saveSettings() {
   const data = {};
   allSettingInputs.forEach((input) => {
@@ -2191,10 +2578,17 @@ function loadSettings() {
   } catch (_) {}
 }
 
+function migrateOneHandCounterClockwiseHotkey() {
+  if (!oneHandCounterClockwiseHotkeyInput) return;
+  if (normalizeHotkeyToken(oneHandCounterClockwiseHotkeyInput.value) === "v") {
+    oneHandCounterClockwiseHotkeyInput.value = DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY;
+  }
+}
+
 function applySettingExplainers() {
   const explainers = {
     levelSelect: "Choose which task is trained: center only, center plus location, or center plus location with distractors.",
-    responseStyleSelect: "Two step keeps the old flow. Combined choices lets you answer emoji and direction in one click or number key.",
+    responseStyleSelect: "Two step keeps the old flow. Combined choices uses answer cards. One-hand keyboard uses S to cycle emoji plus QWE/AD/ZXC for fast no-mouse answers.",
     stimulusAreaSelect: "Circle keeps targets in the ring. Full screen lets targets and distractors appear across the whole stage.",
     directionCountInput: "Controls how many direction slices are used for location choices.",
     choiceCountInput: "Controls how many combined answer cards appear when Combined choices is enabled.",
@@ -2289,6 +2683,10 @@ function closeHotkeyPanel() {
 function resetHotkeysToDefaults() {
   if (centerHotkeysInput) centerHotkeysInput.value = DEFAULT_CENTER_CHOICE_HOTKEYS.join(",");
   if (combinedHotkeysInput) combinedHotkeysInput.value = DEFAULT_COMBINED_CHOICE_HOTKEYS.join(",");
+  if (oneHandEmojiHotkeysInput) oneHandEmojiHotkeysInput.value = DEFAULT_ONE_HAND_EMOJI_HOTKEYS.join(",");
+  if (oneHandCenterSubmitHotkeyInput) oneHandCenterSubmitHotkeyInput.value = DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY;
+  if (oneHandClockwiseHotkeyInput) oneHandClockwiseHotkeyInput.value = DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY;
+  if (oneHandCounterClockwiseHotkeyInput) oneHandCounterClockwiseHotkeyInput.value = DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY;
   if (directionHotkeysInput) directionHotkeysInput.value = DEFAULT_DIRECTION_HOTKEYS;
   if (pauseHotkeyInput) pauseHotkeyInput.value = DEFAULT_PAUSE_HOTKEY;
   if (skipHotkeyInput) skipHotkeyInput.value = DEFAULT_SKIP_HOTKEY;
@@ -2326,6 +2724,7 @@ function renderHotkeyPanel() {
 
   const centerHotkeys = parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS);
   const combinedHotkeys = parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS);
+  const oneHandEmojiHotkeys = parseHotkeyList(oneHandEmojiHotkeysInput, DEFAULT_ONE_HAND_EMOJI_HOTKEYS);
 
   const generalGrid = createHotkeySection("General");
   addHotkeyButton(generalGrid, "Pause / resume", readHotkey(pauseHotkeyInput, DEFAULT_PAUSE_HOTKEY), (value) => {
@@ -2348,6 +2747,20 @@ function renderHotkeyPanel() {
       setIndexedHotkey(combinedHotkeysInput, index, value, DEFAULT_COMBINED_CHOICE_HOTKEYS);
     });
   }
+
+  const oneHandGrid = createHotkeySection("One-hand keyboard");
+  addHotkeyButton(oneHandGrid, "Cycle emoji", oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0], (value) => {
+    setIndexedHotkey(oneHandEmojiHotkeysInput, 0, value, DEFAULT_ONE_HAND_EMOJI_HOTKEYS);
+  });
+  addHotkeyButton(oneHandGrid, "Confirm center", readHotkey(oneHandCenterSubmitHotkeyInput, DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY), (value) => {
+    if (oneHandCenterSubmitHotkeyInput) oneHandCenterSubmitHotkeyInput.value = serializeHotkeyToken(value);
+  });
+  addHotkeyButton(oneHandGrid, "Refine clockwise", readHotkey(oneHandClockwiseHotkeyInput, DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY), (value) => {
+    if (oneHandClockwiseHotkeyInput) oneHandClockwiseHotkeyInput.value = serializeHotkeyToken(value);
+  });
+  addHotkeyButton(oneHandGrid, "Refine counter", readHotkey(oneHandCounterClockwiseHotkeyInput, DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY), (value) => {
+    if (oneHandCounterClockwiseHotkeyInput) oneHandCounterClockwiseHotkeyInput.value = serializeHotkeyToken(value);
+  });
 
   const directionGrid = createHotkeySection("Directions");
   getDirections().forEach((direction) => {
@@ -2445,6 +2858,10 @@ const allSettingInputs = [
   hotkeysInput,
   centerHotkeysInput,
   combinedHotkeysInput,
+  oneHandEmojiHotkeysInput,
+  oneHandCenterSubmitHotkeyInput,
+  oneHandClockwiseHotkeyInput,
+  oneHandCounterClockwiseHotkeyInput,
   directionHotkeysInput,
   pauseHotkeyInput,
   skipHotkeyInput,
@@ -2500,6 +2917,7 @@ levelSelect.addEventListener("change", () => {
   });
 });
 window.addEventListener("keydown", handleKeyboard);
+window.addEventListener("keyup", handleKeyboardKeyup);
 allSettingInputs.forEach((input) => {
   input.addEventListener("change", () => {
     saveSettings();
@@ -2552,6 +2970,10 @@ resetSettingsButton.addEventListener("click", () => {
     hotkeysInput: true,
     centerHotkeysInput: "A,D",
     combinedHotkeysInput: "7,8,9,4,5,6,1,2,3,0",
+    oneHandEmojiHotkeysInput: "S",
+    oneHandCenterSubmitHotkeyInput: DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY,
+    oneHandClockwiseHotkeyInput: DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY,
+    oneHandCounterClockwiseHotkeyInput: DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY,
     directionHotkeysInput: DEFAULT_DIRECTION_HOTKEYS,
     pauseHotkeyInput: DEFAULT_PAUSE_HOTKEY,
     skipHotkeyInput: DEFAULT_SKIP_HOTKEY,
@@ -2620,6 +3042,7 @@ function applyCalmField() {
 applyInputSteps();
 applySettingExplainers();
 loadSettings();
+migrateOneHandCounterClockwiseHotkey();
 updateRangeSliderValue();
 updateLayout();
 applyCalmField();
