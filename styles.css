@@ -3936,17 +3936,17 @@ select {
 }
 
 
-/* One-hand keyboard response style: fast no-mouse chord/map input. */
-.response-overlay.one-hand-mode {
+/* Split keyboard response style: fast no-mouse chord/map input. */
+.response-overlay.split-keyboard-mode {
   width: min(760px, calc(100vw - 32px));
 }
 
-.choice-row.one-hand {
+.choice-row.split-keyboard {
   width: min(720px, 100%);
   justify-content: center;
 }
 
-.one-hand-board {
+.split-keyboard-board {
   display: grid;
   gap: 14px;
   width: 100%;
@@ -3959,14 +3959,14 @@ select {
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
 }
 
-.one-hand-emoji-row {
+.split-keyboard-emoji-row {
   position: relative;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.one-hand-emoji-row::before {
+.split-keyboard-emoji-row::before {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
@@ -3982,18 +3982,18 @@ select {
   pointer-events: none;
 }
 
-.choice-row.one-hand[data-center-index="0"] .one-hand-emoji-row::before {
+.choice-row.split-keyboard[data-center-index="0"] .split-keyboard-emoji-row::before {
   opacity: 1;
   transform: translateX(0);
 }
 
-.choice-row.one-hand[data-center-index="1"] .one-hand-emoji-row::before {
+.choice-row.split-keyboard[data-center-index="1"] .split-keyboard-emoji-row::before {
   opacity: 1;
   transform: translateX(calc(100% + 12px));
 }
 
-.one-hand-emoji-choice,
-.one-hand-direction-key {
+.split-keyboard-emoji-choice,
+.split-keyboard-direction-key {
   border: 1px solid rgba(118, 148, 190, 0.48);
   color: #f8fafc;
   background:
@@ -4002,10 +4002,10 @@ select {
   transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 
-.one-hand-emoji-choice:hover,
-.one-hand-direction-key:hover,
-.one-hand-emoji-choice.selected,
-.one-hand-direction-key.selected {
+.split-keyboard-emoji-choice:hover,
+.split-keyboard-direction-key:hover,
+.split-keyboard-emoji-choice.selected,
+.split-keyboard-direction-key.selected {
   transform: translateY(-1px);
   border-color: rgba(65, 105, 225, 0.78);
   background:
@@ -4013,7 +4013,7 @@ select {
     #020617;
 }
 
-.one-hand-emoji-choice {
+.split-keyboard-emoji-choice {
   position: relative;
   z-index: 1;
   display: grid;
@@ -4025,7 +4025,7 @@ select {
   border-radius: 16px;
 }
 
-.one-hand-emoji-choice strong {
+.split-keyboard-emoji-choice strong {
   display: grid;
   place-items: center;
   min-height: 58px;
@@ -4033,8 +4033,8 @@ select {
   filter: grayscale(1);
 }
 
-.one-hand-emoji-choice span,
-.one-hand-direction-key strong {
+.split-keyboard-emoji-choice span,
+.split-keyboard-direction-key strong {
   display: grid;
   place-items: center;
   min-width: 34px;
@@ -4047,19 +4047,19 @@ select {
   line-height: 1;
 }
 
-.one-hand-direction-map {
+.split-keyboard-direction-map {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
-.one-hand-direction-key,
-.one-hand-direction-gap {
+.split-keyboard-direction-key,
+.split-keyboard-direction-gap {
   min-height: 72px;
   border-radius: 16px;
 }
 
-.one-hand-direction-key {
+.split-keyboard-direction-key {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 10px;
@@ -4067,7 +4067,7 @@ select {
   padding: 10px 12px;
 }
 
-.one-hand-direction-key span {
+.split-keyboard-direction-key span {
   color: #cbd5e1;
   font-size: 0.85rem;
   font-weight: 950;
@@ -4075,18 +4075,18 @@ select {
   text-align: left;
 }
 
-.one-hand-direction-gap {
+.split-keyboard-direction-gap {
   border: 1px dashed rgba(118, 148, 190, 0.18);
   background: rgba(255, 255, 255, 0.018);
 }
 
-.one-hand-refine-row {
+.split-keyboard-refine-row {
   display: flex;
   justify-content: center;
   gap: 10px;
 }
 
-.one-hand-refine-chip {
+.split-keyboard-refine-chip {
   display: inline-grid;
   grid-template-columns: auto auto;
   gap: 8px;
@@ -4099,21 +4099,21 @@ select {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.one-hand-refine-chip.active {
+.split-keyboard-refine-chip.active {
   border-color: rgba(251, 191, 36, 0.7);
   color: #fbbf24;
   background: rgba(251, 191, 36, 0.12);
   box-shadow: 0 0 22px rgba(251, 191, 36, 0.14);
 }
 
-.one-hand-refine-icon {
+.split-keyboard-refine-icon {
   width: 31px;
   height: 31px;
   overflow: visible;
 }
 
-.one-hand-refine-arc,
-.one-hand-refine-arrow {
+.split-keyboard-refine-arc,
+.split-keyboard-refine-arrow {
   fill: none;
   stroke: currentColor;
   stroke-width: 3.2;
@@ -4121,7 +4121,7 @@ select {
   stroke-linejoin: round;
 }
 
-.one-hand-refine-chip span {
+.split-keyboard-refine-chip span {
   display: grid;
   place-items: center;
   min-width: 28px;
@@ -4134,37 +4134,246 @@ select {
   line-height: 1;
 }
 
-.one-hand-refine-chip.active span {
+.split-keyboard-refine-chip.active span {
   background: linear-gradient(180deg, #fef3c7, #fbbf24);
 }
 
-.choice-row.one-hand[data-refine]::after {
+.choice-row.split-keyboard[data-refine]::after {
   content: none;
   display: none;
 }
 
 @media (max-width: 860px) {
-  .response-overlay.one-hand-mode {
+  .response-overlay.split-keyboard-mode {
     width: min(620px, calc(100vw - 20px));
   }
 
-  .one-hand-board {
+  .split-keyboard-board {
     gap: 10px;
     padding: 10px;
     border-radius: 18px;
   }
 
-  .one-hand-emoji-choice {
+  .split-keyboard-emoji-choice {
     min-height: 62px;
   }
 
-  .one-hand-emoji-choice strong {
+  .split-keyboard-emoji-choice strong {
     min-height: 44px;
     font-size: 1.8rem;
   }
 
-  .one-hand-direction-key,
-  .one-hand-direction-gap {
+  .split-keyboard-direction-key,
+  .split-keyboard-direction-gap {
     min-height: 58px;
+  }
+}
+
+
+/* Hold wheel response style: click-hold emoji, drag to radial direction, release. */
+.response-overlay.hold-wheel-mode {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.choice-row.hold-wheel {
+  width: min(520px, 100%);
+  justify-content: center;
+}
+
+.hold-wheel-board {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid rgba(118, 148, 190, 0.28);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(65, 105, 225, 0.08), transparent 17rem),
+    rgba(1, 1, 1, 0.78);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+.hold-wheel-emoji-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hold-wheel-emoji-choice {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 86px;
+  padding: 10px 12px;
+  border: 1px solid rgba(118, 148, 190, 0.5);
+  border-radius: 18px;
+  color: #f8fafc;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.015)),
+    #010101;
+  touch-action: none;
+  user-select: none;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.hold-wheel-emoji-choice:hover,
+.hold-wheel-emoji-choice.selected,
+.hold-wheel-emoji-choice.dragging {
+  transform: translateY(-1px);
+  border-color: rgba(65, 105, 225, 0.8);
+  background:
+    linear-gradient(180deg, rgba(65, 105, 225, 0.18), rgba(255, 255, 255, 0.025)),
+    #020617;
+}
+
+.hold-wheel-emoji-choice strong {
+  display: grid;
+  place-items: center;
+  min-height: 62px;
+  font-size: 2.45rem;
+  filter: grayscale(1);
+}
+
+.hold-wheel-emoji-choice span {
+  display: grid;
+  place-items: center;
+  min-width: 56px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #020617;
+  background: linear-gradient(180deg, #ffffff, #cbd5e1);
+  font-size: 0.78rem;
+  font-weight: 950;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.hold-wheel-hint {
+  margin: 0;
+  color: #9aa8c7;
+  font-size: 0.84rem;
+  font-weight: 800;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.hold-wheel-popover {
+  position: fixed;
+  z-index: 320;
+  left: 50%;
+  top: 50%;
+  width: var(--hold-wheel-size, 250px);
+  height: var(--hold-wheel-size, 250px);
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(3, 7, 18, 0.98) 0 24%, rgba(3, 7, 18, 0.72) 25% 100%);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58), 0 0 0 9999px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  user-select: none;
+}
+
+.hold-wheel-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.hold-wheel-slice {
+  fill: rgba(65, 105, 225, 0.09);
+  stroke: rgba(148, 163, 184, 0.34);
+  stroke-width: 0.42;
+  transition: fill 90ms ease, stroke 90ms ease;
+}
+
+.hold-wheel-slice.hovered {
+  fill: rgba(65, 105, 225, 0.36);
+  stroke: rgba(226, 232, 240, 0.75);
+}
+
+.hold-wheel-slice.selected {
+  fill: rgba(248, 20, 36, 0.78);
+  stroke: rgba(254, 226, 226, 0.72);
+}
+
+.hold-wheel-slice.selected.hovered {
+  fill: rgba(248, 20, 36, 0.92);
+}
+
+.hold-wheel-label {
+  fill: #e2e8f0;
+  font: 900 5.2px Inter, system-ui, sans-serif;
+  letter-spacing: 0.03em;
+  paint-order: stroke;
+  stroke: rgba(3, 7, 18, 0.86);
+  stroke-width: 1.8px;
+  text-transform: uppercase;
+}
+
+.hold-wheel-label.hovered,
+.hold-wheel-label.selected {
+  fill: #ffffff;
+}
+
+.hold-wheel-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30%;
+  height: 30%;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(226, 232, 240, 0.38);
+  border-radius: 50%;
+  background: rgba(3, 7, 18, 0.94);
+  font-size: calc(var(--hold-wheel-size, 250px) * 0.115);
+  filter: grayscale(1);
+  box-shadow: 0 0 26px rgba(65, 105, 225, 0.2);
+}
+
+.hold-wheel-floating-help {
+  position: absolute;
+  left: 50%;
+  bottom: -34px;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 999px;
+  color: #cbd5e1;
+  background: rgba(3, 7, 18, 0.94);
+  font-size: 0.72rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+body.hold-wheel-gesture-active {
+  cursor: grabbing;
+  user-select: none;
+}
+
+@media (max-width: 860px) {
+  .response-overlay.hold-wheel-mode {
+    width: min(520px, calc(100vw - 20px));
+  }
+
+  .hold-wheel-board {
+    padding: 10px;
+    border-radius: 18px;
+  }
+
+  .hold-wheel-emoji-choice {
+    min-height: 68px;
+  }
+
+  .hold-wheel-emoji-choice strong {
+    min-height: 48px;
+    font-size: 1.9rem;
   }
 }

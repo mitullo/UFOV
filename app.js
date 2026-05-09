@@ -57,10 +57,9 @@ const letterBlurInput = document.getElementById("letterBlurInput");
 const hotkeysInput = document.getElementById("hotkeysInput");
 const centerHotkeysInput = document.getElementById("centerHotkeysInput");
 const combinedHotkeysInput = document.getElementById("combinedHotkeysInput");
-const oneHandEmojiHotkeysInput = document.getElementById("oneHandEmojiHotkeysInput");
-const oneHandCenterSubmitHotkeyInput = document.getElementById("oneHandCenterSubmitHotkeyInput");
-const oneHandClockwiseHotkeyInput = document.getElementById("oneHandClockwiseHotkeyInput");
-const oneHandCounterClockwiseHotkeyInput = document.getElementById("oneHandCounterClockwiseHotkeyInput");
+const splitKeyboardEmojiHotkeysInput = document.getElementById("splitKeyboardEmojiHotkeysInput");
+const splitKeyboardClockwiseHotkeyInput = document.getElementById("splitKeyboardClockwiseHotkeyInput");
+const splitKeyboardCounterClockwiseHotkeyInput = document.getElementById("splitKeyboardCounterClockwiseHotkeyInput");
 const directionHotkeysInput = document.getElementById("directionHotkeysInput");
 const pauseHotkeyInput = document.getElementById("pauseHotkeyInput");
 const skipHotkeyInput = document.getElementById("skipHotkeyInput");
@@ -103,10 +102,9 @@ const TRIAL_GOAL_STATE_KEY = "ufov_trial_goal_state";
 const MOBILE_WARNING_SESSION_KEY = "ufov_mobile_warning_seen";
 const DEFAULT_CENTER_CHOICE_HOTKEYS = ["A", "D"];
 const DEFAULT_COMBINED_CHOICE_HOTKEYS = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "0"];
-const DEFAULT_ONE_HAND_EMOJI_HOTKEYS = ["S"];
-const DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY = "D";
-const DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY = "R";
-const DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY = "F";
+const DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS = ["ArrowLeft", "ArrowRight"];
+const DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY = "R";
+const DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY = "F";
 const DEFAULT_DIRECTION_HOTKEYS = "E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C";
 const DEFAULT_PAUSE_HOTKEY = "Space";
 const DEFAULT_SKIP_HOTKEY = "Backspace";
@@ -127,8 +125,9 @@ let activeSession = null;
 let countdownTimer = null;
 let hoverDirection = null;
 let activeHotkeyCapture = null;
-let oneHandResponse = createOneHandResponseState();
-let activeOneHandRefine = null;
+let splitKeyboardResponse = createSplitKeyboardResponseState();
+let activeSplitKeyboardRefine = null;
+let holdWheelResponse = createHoldWheelResponseState();
 let combinedArmedSlotIndex = null;
 
 function createInitialState() {
@@ -173,7 +172,7 @@ function createTrialGoalState() {
   };
 }
 
-function createOneHandResponseState() {
+function createSplitKeyboardResponseState() {
   return {
     active: false,
     centerChoices: [],
@@ -181,6 +180,21 @@ function createOneHandResponseState() {
     selectedCenterIndex: -1,
     selectedDirections: [],
     requiredDirections: 0
+  };
+}
+
+function createHoldWheelResponseState() {
+  return {
+    active: false,
+    centerChoices: [],
+    selectedCenter: null,
+    selectedDirections: [],
+    requiredDirections: 0,
+    pointerId: null,
+    sourceButton: null,
+    wheelElement: null,
+    wheelCenter: { x: 0, y: 0 },
+    hoverDirection: null
   };
 }
 
@@ -218,10 +232,9 @@ function getSettings() {
     hotkeys: hotkeysInput ? hotkeysInput.checked : true,
     centerChoiceHotkeys: parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS),
     combinedChoiceHotkeys: parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS),
-    oneHandEmojiHotkeys: parseHotkeyList(oneHandEmojiHotkeysInput, DEFAULT_ONE_HAND_EMOJI_HOTKEYS),
-    oneHandCenterSubmitHotkey: readHotkey(oneHandCenterSubmitHotkeyInput, DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY),
-    oneHandClockwiseHotkey: readHotkey(oneHandClockwiseHotkeyInput, DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY),
-    oneHandCounterClockwiseHotkey: readHotkey(oneHandCounterClockwiseHotkeyInput, DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY),
+    splitKeyboardEmojiHotkeys: parseHotkeyList(splitKeyboardEmojiHotkeysInput, DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS),
+    splitKeyboardClockwiseHotkey: readHotkey(splitKeyboardClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY),
+    splitKeyboardCounterClockwiseHotkey: readHotkey(splitKeyboardCounterClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY),
     directionHotkeyMap: parseDirectionHotkeyMap(directionHotkeysInput ? directionHotkeysInput.value : DEFAULT_DIRECTION_HOTKEYS),
     pauseHotkey: readHotkey(pauseHotkeyInput, DEFAULT_PAUSE_HOTKEY),
     skipHotkey: readHotkey(skipHotkeyInput, DEFAULT_SKIP_HOTKEY),
@@ -1256,6 +1269,7 @@ function clearStage() {
   centerStimulus.classList.remove("visible");
   hideMask();
   hideDirectionPreview();
+  cleanupHoldWheelGesture(true);
   clearCombinedArmedSlot();
   stage.classList.remove("selecting-location");
   removeSectors();
@@ -1265,7 +1279,8 @@ function clearStage() {
   occupiedStimulusPoints = [];
   peripheralElements = [];
   decoyElements = [];
-  resetOneHandResponse();
+  resetSplitKeyboardResponse();
+  resetHoldWheelResponse();
   responseLock = true;
 }
 
@@ -1364,16 +1379,20 @@ function presentResponseControls() {
   const fixation = document.getElementById("fixation");
   if (fixation) fixation.classList.add("hidden");
   const responseStyle = getSettings().responseStyle;
-  if (responseStyle === "oneHand") {
-    presentOneHandResponse();
+  if (responseStyle === "splitKeyboard") {
+    presentSplitKeyboardResponse();
+    return;
+  }
+  if (responseStyle === "holdWheel") {
+    presentHoldWheelResponse();
     return;
   }
   if (state.level >= 2 && responseStyle === "combined") {
     presentCombinedChoices();
     return;
   }
-  responseOverlay.classList.remove("combined-mode", "one-hand-mode");
-  choiceRow.classList.remove("combined", "one-hand");
+  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "hold-wheel-mode");
+  choiceRow.classList.remove("combined", "split-keyboard", "hold-wheel");
   responseLock = false;
   responseOverlay.classList.add("visible");
   responseOverlay.classList.remove("feedback-mode", "peripheral-chooser");
@@ -1408,9 +1427,9 @@ function presentCombinedChoices() {
   responseLock = false;
   combinedArmedSlotIndex = null;
   responseOverlay.classList.add("visible");
-  responseOverlay.classList.remove("peripheral-chooser", "one-hand-mode");
+  responseOverlay.classList.remove("peripheral-chooser", "split-keyboard-mode", "hold-wheel-mode");
   responseOverlay.classList.add("combined-mode");
-  choiceRow.classList.remove("one-hand");
+  choiceRow.classList.remove("split-keyboard", "hold-wheel");
   choiceRow.classList.add("combined");
   promptText.className = "";
   promptText.textContent = "Pick the location, then the emoji.";
@@ -1470,50 +1489,51 @@ function presentCombinedChoices() {
   }
  }
 
-function presentOneHandResponse() {
+function presentSplitKeyboardResponse() {
   responseLock = false;
-  oneHandResponse = createOneHandResponseState();
-  oneHandResponse.active = true;
-  oneHandResponse.centerChoices = shuffle([state.current.center, state.current.decoy]);
-  oneHandResponse.requiredDirections = state.level >= 2 ? getRequiredPeripheralCount() : 0;
-  activeOneHandRefine = null;
+  splitKeyboardResponse = createSplitKeyboardResponseState();
+  splitKeyboardResponse.active = true;
+  splitKeyboardResponse.centerChoices = shuffle([state.current.center, state.current.decoy]);
+  splitKeyboardResponse.requiredDirections = state.level >= 2 ? getRequiredPeripheralCount() : 0;
+  activeSplitKeyboardRefine = null;
 
-  responseOverlay.classList.add("visible", "one-hand-mode");
-  responseOverlay.classList.remove("combined-mode", "peripheral-chooser", "feedback-mode");
-  choiceRow.classList.remove("combined");
-  choiceRow.classList.add("one-hand");
+  responseOverlay.classList.add("visible", "split-keyboard-mode");
+  responseOverlay.classList.remove("combined-mode", "hold-wheel-mode", "peripheral-chooser", "feedback-mode");
+  choiceRow.classList.remove("combined", "hold-wheel");
+  choiceRow.classList.add("split-keyboard");
   promptText.className = "";
-  promptText.textContent = state.level === 1 ? "Cycle to the center emoji." : "Cycle emoji, then tap direction.";
-  feedbackText.textContent = getOneHandInstructionText();
+  promptText.textContent = state.level === 1 ? "Pick the center emoji." : "Arrow keys pick emoji, then tap direction.";
+  feedbackText.textContent = getSplitKeyboardInstructionText();
   choiceRow.innerHTML = "";
 
-  renderOneHandBoard();
+  renderSplitKeyboardBoard();
 }
 
-function resetOneHandResponse() {
-  oneHandResponse = createOneHandResponseState();
-  activeOneHandRefine = null;
+function resetSplitKeyboardResponse() {
+  splitKeyboardResponse = createSplitKeyboardResponseState();
+  activeSplitKeyboardRefine = null;
   if (choiceRow) {
-    choiceRow.classList.remove("one-hand", "one-hand-refine-clockwise", "one-hand-refine-counter");
+    choiceRow.classList.remove("split-keyboard", "split-keyboard-refine-clockwise", "split-keyboard-refine-counter");
     delete choiceRow.dataset.refine;
     delete choiceRow.dataset.centerIndex;
   }
-  if (responseOverlay) responseOverlay.classList.remove("one-hand-mode");
+  if (responseOverlay) responseOverlay.classList.remove("split-keyboard-mode");
 }
 
-function getOneHandInstructionText() {
+function getSplitKeyboardInstructionText() {
   const settings = getSettings();
-  const cycleKey = displayHotkey(settings.oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0]);
-  if (state.level === 1) return `${cycleKey} cycles emoji · ${displayHotkey(settings.oneHandCenterSubmitHotkey)} confirms`;
+  const leftKey = displayHotkey(settings.splitKeyboardEmojiHotkeys[0] || DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS[0]);
+  const rightKey = displayHotkey(settings.splitKeyboardEmojiHotkeys[1] || DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS[1]);
+  if (state.level === 1) return `${leftKey}/${rightKey} = center emoji`;
 
   const targetCount = getRequiredPeripheralCount();
   const refineText = getDirections().length > 8
-    ? ` · ${displayHotkey(settings.oneHandCounterClockwiseHotkey)}/${displayHotkey(settings.oneHandClockwiseHotkey)} refine` 
+    ? ` · ${displayHotkey(settings.splitKeyboardCounterClockwiseHotkey)}/${displayHotkey(settings.splitKeyboardClockwiseHotkey)} refine` 
     : "";
-  return `${cycleKey} cycles emoji · QWE/AD/ZXC choose direction${refineText}${targetCount > 1 ? ` · ${targetCount} targets` : ""}`;
+  return `${leftKey}/${rightKey} pick emoji · QWE/AD/ZXC choose direction${refineText}${targetCount > 1 ? ` · ${targetCount} targets` : ""}`;
 }
 
-function getOneHandRefineIconSvg(mode) {
+function getSplitKeyboardRefineIconSvg(mode) {
   const clockwise = mode === "clockwise";
   const arc = clockwise
     ? "M 11.2 7.4 A 9.8 9.8 0 1 1 8.2 15.3"
@@ -1523,34 +1543,34 @@ function getOneHandRefineIconSvg(mode) {
     : "M 20.8 7.4 H 13.8 V 14.4";
 
   return `
-    <svg class="one-hand-refine-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <path class="one-hand-refine-arc" d="${arc}" />
-      <path class="one-hand-refine-arrow" d="${arrow}" />
+    <svg class="split-keyboard-refine-icon" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <path class="split-keyboard-refine-arc" d="${arc}" />
+      <path class="split-keyboard-refine-arrow" d="${arrow}" />
     </svg>
   `;
 }
 
-function renderOneHandBoard() {
+function renderSplitKeyboardBoard() {
   choiceRow.innerHTML = "";
   const settings = getSettings();
   const board = document.createElement("div");
-  board.className = "one-hand-board";
+  board.className = "split-keyboard-board";
 
   const emojiRow = document.createElement("div");
-  emojiRow.className = "one-hand-emoji-row";
-  const cycleKey = settings.oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0];
-  oneHandResponse.centerChoices.forEach((choice, index) => {
+  emojiRow.className = "split-keyboard-emoji-row";
+  splitKeyboardResponse.centerChoices.forEach((choice, index) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "one-hand-emoji-choice";
-    button.dataset.oneHandCenterIndex = String(index);
-    button.dataset.hotkey = cycleKey;
-    button.title = `${displayHotkey(cycleKey)} cycle ${index + 1}`;
-    button.innerHTML = `<strong>${choice}</strong><span>${index === 0 ? displayHotkey(cycleKey) : `${displayHotkey(cycleKey)}×${index + 1}`}</span>`;
+    button.className = "split-keyboard-emoji-choice";
+    button.dataset.splitKeyboardCenterIndex = String(index);
+    const hotkey = settings.splitKeyboardEmojiHotkeys[index] || DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS[index] || String(index + 1);
+    button.dataset.hotkey = hotkey;
+    button.title = `Hotkey ${displayHotkey(hotkey)}`;
+    button.innerHTML = `<strong>${choice}</strong><span>${displayHotkey(hotkey)}</span>`;
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      selectOneHandCenterByIndex(index);
+      submitSplitKeyboardCenter(choice);
     });
     emojiRow.appendChild(button);
   });
@@ -1558,11 +1578,11 @@ function renderOneHandBoard() {
 
   if (state.level >= 2) {
     const directionMap = document.createElement("div");
-    directionMap.className = "one-hand-direction-map";
-    getOneHandDirectionSlots().forEach((slot) => {
+    directionMap.className = "split-keyboard-direction-map";
+    getSplitKeyboardDirectionSlots().forEach((slot) => {
       if (!slot) {
         const gap = document.createElement("div");
-        gap.className = "one-hand-direction-gap";
+        gap.className = "split-keyboard-direction-gap";
         directionMap.appendChild(gap);
         return;
       }
@@ -1570,14 +1590,14 @@ function renderOneHandBoard() {
       const direction = nearestDirectionByAngle(slot.angle);
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "one-hand-direction-key";
+      button.className = "split-keyboard-direction-key";
       button.dataset.directionIndex = String(direction.index);
       button.innerHTML = `<strong>${slot.key}</strong><span>${direction.label}</span>`;
       button.title = direction.name;
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        submitOneHandDirection(direction);
+        submitSplitKeyboardDirection(direction);
       });
       directionMap.appendChild(button);
     });
@@ -1585,18 +1605,18 @@ function renderOneHandBoard() {
 
     if (getDirections().length > 8) {
       const refineRow = document.createElement("div");
-      refineRow.className = "one-hand-refine-row";
+      refineRow.className = "split-keyboard-refine-row";
       [
-        { mode: "counterClockwise", hotkey: settings.oneHandCounterClockwiseHotkey, label: "Counter-clockwise half-step" },
-        { mode: "clockwise", hotkey: settings.oneHandClockwiseHotkey, label: "Clockwise half-step" }
+        { mode: "counterClockwise", hotkey: settings.splitKeyboardCounterClockwiseHotkey, label: "Counter-clockwise half-step" },
+        { mode: "clockwise", hotkey: settings.splitKeyboardClockwiseHotkey, label: "Clockwise half-step" }
       ].forEach((option) => {
         const chip = document.createElement("div");
-        chip.className = "one-hand-refine-chip";
+        chip.className = "split-keyboard-refine-chip";
         chip.dataset.refineMode = option.mode;
         chip.setAttribute("role", "img");
         chip.setAttribute("aria-label", `${displayHotkey(option.hotkey)} ${option.label}`);
         chip.title = `${displayHotkey(option.hotkey)} · ${option.label}`;
-        chip.innerHTML = `${getOneHandRefineIconSvg(option.mode)}<span>${displayHotkey(option.hotkey)}</span>`;
+        chip.innerHTML = `${getSplitKeyboardRefineIconSvg(option.mode)}<span>${displayHotkey(option.hotkey)}</span>`;
         refineRow.appendChild(chip);
       });
       board.appendChild(refineRow);
@@ -1604,10 +1624,10 @@ function renderOneHandBoard() {
   }
 
   choiceRow.appendChild(board);
-  updateOneHandVisualState();
+  updateSplitKeyboardVisualState();
 }
 
-function getOneHandDirectionSlots() {
+function getSplitKeyboardDirectionSlots() {
   const cardinalSlots = [
     null, { key: "W", angle: 90 }, null,
     { key: "A", angle: 180 }, null, { key: "D", angle: 0 },
@@ -1631,7 +1651,7 @@ function nearestDirectionByAngle(angle) {
   }, { direction: getDirections()[0], distance: Infinity }).direction;
 }
 
-function getOneHandKeyboardBaseAngle(event) {
+function getSplitKeyboardKeyboardBaseAngle(event) {
   if (getDirections().length <= 4 && ["KeyQ", "KeyE", "KeyZ", "KeyC"].includes(event.code)) return null;
 
   const keyMap = {
@@ -1648,161 +1668,429 @@ function getOneHandKeyboardBaseAngle(event) {
   return null;
 }
 
-function oneHandDirectionFromKeyboard(event) {
-  const baseAngle = getOneHandKeyboardBaseAngle(event);
+function splitKeyboardDirectionFromKeyboard(event) {
+  const baseAngle = getSplitKeyboardKeyboardBaseAngle(event);
   if (baseAngle === null) return null;
 
   let angle = baseAngle;
   const directions = getDirections();
-  if (directions.length > 8 && activeOneHandRefine) {
+  if (directions.length > 8 && activeSplitKeyboardRefine) {
     const step = 360 / directions.length;
-    angle += activeOneHandRefine === "clockwise" ? -step : step;
+    angle += activeSplitKeyboardRefine === "clockwise" ? -step : step;
   }
 
   return nearestDirectionByAngle(angle);
 }
 
-function cycleOneHandCenter() {
-  if (!oneHandResponse.active || responseLock || !oneHandResponse.centerChoices.length) return;
-  const nextIndex = oneHandResponse.selectedCenterIndex < 0
-    ? 0
-    : (oneHandResponse.selectedCenterIndex + 1) % oneHandResponse.centerChoices.length;
-  selectOneHandCenterByIndex(nextIndex);
-}
-
-function selectOneHandCenterByIndex(index) {
-  if (!oneHandResponse.active || responseLock) return;
-  const safeIndex = clamp(Math.round(index), 0, oneHandResponse.centerChoices.length - 1);
-  const choice = oneHandResponse.centerChoices[safeIndex];
-  if (!choice) return;
-
-  oneHandResponse.selectedCenterIndex = safeIndex;
-  oneHandResponse.selectedCenter = choice;
+function submitSplitKeyboardCenter(choice) {
+  if (!splitKeyboardResponse.active || responseLock) return;
+  splitKeyboardResponse.selectedCenter = choice;
+  splitKeyboardResponse.selectedCenterIndex = splitKeyboardResponse.centerChoices.indexOf(choice);
   state.response.center = choice;
 
   if (state.level === 1) {
-    promptText.textContent = "Confirm the center emoji.";
-    feedbackText.textContent = `${displayHotkey(getSettings().oneHandCenterSubmitHotkey)} confirms · ${displayHotkey(getSettings().oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0])} switches`;
-  } else {
-    promptText.textContent = "Tap the target direction.";
-    const count = oneHandResponse.requiredDirections;
-    const chosen = oneHandResponse.selectedDirections.length;
-    feedbackText.textContent = count > 1 ? `${chosen}/${count} directions selected` : "Tap Q/W/E/A/D/Z/X/C.";
-  }
-
-  updateOneHandVisualState();
-}
-
-function confirmOneHandCenterOnly() {
-  if (!oneHandResponse.active || responseLock || state.level !== 1) return false;
-  if (!oneHandResponse.selectedCenter) cycleOneHandCenter();
-  if (!oneHandResponse.selectedCenter) return false;
-  finishTrial();
-  return true;
-}
-
-function submitOneHandCenter(choice) {
-  const index = oneHandResponse.centerChoices.indexOf(choice);
-  selectOneHandCenterByIndex(index >= 0 ? index : 0);
-}
-
-function submitOneHandDirection(direction) {
-  if (!oneHandResponse.active || responseLock || state.level < 2) return;
-
-  if (!oneHandResponse.selectedCenter) {
-    promptText.textContent = "Press the emoji cycle key first.";
-    feedbackText.textContent = getOneHandInstructionText();
+    finishTrial();
     return;
   }
 
-  const alreadySelected = oneHandResponse.selectedDirections.some((selected) => selected.index === direction.index);
-  if (!alreadySelected) oneHandResponse.selectedDirections.push(direction);
-  else if (oneHandResponse.requiredDirections > 1) {
-    oneHandResponse.selectedDirections = oneHandResponse.selectedDirections.filter((selected) => selected.index !== direction.index);
+  promptText.textContent = "Tap the target direction.";
+  const count = splitKeyboardResponse.requiredDirections;
+  const chosen = splitKeyboardResponse.selectedDirections.length;
+  feedbackText.textContent = count > 1 ? `${chosen}/${count} directions selected` : "Tap Q/W/E/A/D/Z/X/C.";
+  updateSplitKeyboardVisualState();
+}
+
+function submitSplitKeyboardDirection(direction) {
+  if (!splitKeyboardResponse.active || responseLock || state.level < 2) return;
+
+  if (!splitKeyboardResponse.selectedCenter) {
+    promptText.textContent = "Pick an emoji first.";
+    feedbackText.textContent = getSplitKeyboardInstructionText();
+    return;
   }
 
-  state.response.peripherals = oneHandResponse.selectedDirections.slice(0, oneHandResponse.requiredDirections);
-  updateOneHandVisualState();
+  const alreadySelected = splitKeyboardResponse.selectedDirections.some((selected) => selected.index === direction.index);
+  if (!alreadySelected) splitKeyboardResponse.selectedDirections.push(direction);
+  else if (splitKeyboardResponse.requiredDirections > 1) {
+    splitKeyboardResponse.selectedDirections = splitKeyboardResponse.selectedDirections.filter((selected) => selected.index !== direction.index);
+  }
+
+  state.response.peripherals = splitKeyboardResponse.selectedDirections.slice(0, splitKeyboardResponse.requiredDirections);
+  updateSplitKeyboardVisualState();
 
   const selectedCount = state.response.peripherals.length;
-  if (selectedCount >= oneHandResponse.requiredDirections) {
+  if (selectedCount >= splitKeyboardResponse.requiredDirections) {
     finishTrial();
     return;
   }
 
   promptText.textContent = "Tap the next target direction.";
-  feedbackText.textContent = `${selectedCount}/${oneHandResponse.requiredDirections} directions selected`;
+  feedbackText.textContent = `${selectedCount}/${splitKeyboardResponse.requiredDirections} directions selected`;
 }
 
-function updateOneHandVisualState() {
+function updateSplitKeyboardVisualState() {
   if (!choiceRow) return;
   const settings = getSettings();
-  if (oneHandResponse.selectedCenterIndex >= 0) choiceRow.dataset.centerIndex = String(oneHandResponse.selectedCenterIndex);
+  if (splitKeyboardResponse.selectedCenterIndex >= 0) choiceRow.dataset.centerIndex = String(splitKeyboardResponse.selectedCenterIndex);
   else delete choiceRow.dataset.centerIndex;
 
-  choiceRow.querySelectorAll(".one-hand-emoji-choice").forEach((button) => {
-    const index = Number(button.dataset.oneHandCenterIndex);
-    button.classList.toggle("selected", index === oneHandResponse.selectedCenterIndex);
+  choiceRow.querySelectorAll(".split-keyboard-emoji-choice").forEach((button) => {
+    const index = Number(button.dataset.splitKeyboardCenterIndex);
+    button.classList.toggle("selected", index === splitKeyboardResponse.selectedCenterIndex);
   });
 
-  const selectedDirectionIndexes = new Set(oneHandResponse.selectedDirections.map((direction) => direction.index));
-  choiceRow.querySelectorAll(".one-hand-direction-key").forEach((button) => {
+  const selectedDirectionIndexes = new Set(splitKeyboardResponse.selectedDirections.map((direction) => direction.index));
+  choiceRow.querySelectorAll(".split-keyboard-direction-key").forEach((button) => {
     const directionIndex = Number(button.dataset.directionIndex);
     button.classList.toggle("selected", selectedDirectionIndexes.has(directionIndex));
   });
 
-  choiceRow.classList.toggle("one-hand-refine-clockwise", activeOneHandRefine === "clockwise");
-  choiceRow.classList.toggle("one-hand-refine-counter", activeOneHandRefine === "counterClockwise");
+  choiceRow.classList.toggle("split-keyboard-refine-clockwise", activeSplitKeyboardRefine === "clockwise");
+  choiceRow.classList.toggle("split-keyboard-refine-counter", activeSplitKeyboardRefine === "counterClockwise");
 
-  choiceRow.querySelectorAll(".one-hand-refine-chip").forEach((chip) => {
-    chip.classList.toggle("active", chip.dataset.refineMode === activeOneHandRefine);
+  choiceRow.querySelectorAll(".split-keyboard-refine-chip").forEach((chip) => {
+    chip.classList.toggle("active", chip.dataset.refineMode === activeSplitKeyboardRefine);
   });
   delete choiceRow.dataset.refine;
 }
 
-function setOneHandRefineFromKeyboard(event, isDown) {
-  if (!oneHandResponse.active || !getSettings().hotkeys) return false;
+function setSplitKeyboardRefineFromKeyboard(event, isDown) {
+  if (!splitKeyboardResponse.active || !getSettings().hotkeys) return false;
   const settings = getSettings();
-  if (eventMatchesHotkey(event, settings.oneHandClockwiseHotkey)) {
-    activeOneHandRefine = isDown ? "clockwise" : (activeOneHandRefine === "clockwise" ? null : activeOneHandRefine);
-    updateOneHandVisualState();
+  if (eventMatchesHotkey(event, settings.splitKeyboardClockwiseHotkey)) {
+    activeSplitKeyboardRefine = isDown ? "clockwise" : (activeSplitKeyboardRefine === "clockwise" ? null : activeSplitKeyboardRefine);
+    updateSplitKeyboardVisualState();
     return true;
   }
-  if (eventMatchesHotkey(event, settings.oneHandCounterClockwiseHotkey)) {
-    activeOneHandRefine = isDown ? "counterClockwise" : (activeOneHandRefine === "counterClockwise" ? null : activeOneHandRefine);
-    updateOneHandVisualState();
+  if (eventMatchesHotkey(event, settings.splitKeyboardCounterClockwiseHotkey)) {
+    activeSplitKeyboardRefine = isDown ? "counterClockwise" : (activeSplitKeyboardRefine === "counterClockwise" ? null : activeSplitKeyboardRefine);
+    updateSplitKeyboardVisualState();
     return true;
   }
   return false;
 }
 
-function handleOneHandHotkey(event) {
-  if (!oneHandResponse.active || responseLock) return false;
-  if (event.repeat && setOneHandRefineFromKeyboard(event, true)) return true;
+function handleSplitKeyboardHotkey(event) {
+  if (!splitKeyboardResponse.active || responseLock) return false;
+  if (event.repeat && setSplitKeyboardRefineFromKeyboard(event, true)) return true;
 
   const settings = getSettings();
-  if (findHotkeyIndex(event, settings.oneHandEmojiHotkeys) >= 0) {
-    cycleOneHandCenter();
+  const centerIndex = findHotkeyIndex(event, settings.splitKeyboardEmojiHotkeys);
+  if (centerIndex >= 0 && splitKeyboardResponse.centerChoices[centerIndex]) {
+    submitSplitKeyboardCenter(splitKeyboardResponse.centerChoices[centerIndex]);
     return true;
   }
 
-  if (state.level === 1 && eventMatchesHotkey(event, settings.oneHandCenterSubmitHotkey)) {
-    return confirmOneHandCenterOnly();
-  }
+  if (setSplitKeyboardRefineFromKeyboard(event, true)) return true;
 
-  if (setOneHandRefineFromKeyboard(event, true)) return true;
-
-  const direction = oneHandDirectionFromKeyboard(event);
+  const direction = splitKeyboardDirectionFromKeyboard(event);
   if (direction) {
-    submitOneHandDirection(direction);
+    submitSplitKeyboardDirection(direction);
     return true;
   }
 
   return false;
 }
 
-function isOneHandResponseActive() {
-  return oneHandResponse.active && responseOverlay.classList.contains("one-hand-mode") && !responseLock;
+function isSplitKeyboardResponseActive() {
+  return splitKeyboardResponse.active && responseOverlay.classList.contains("split-keyboard-mode") && !responseLock;
+}
+
+
+function presentHoldWheelResponse() {
+  responseLock = false;
+  resetHoldWheelResponse();
+  holdWheelResponse = createHoldWheelResponseState();
+  holdWheelResponse.active = true;
+  holdWheelResponse.centerChoices = shuffle([state.current.center, state.current.decoy]);
+  holdWheelResponse.requiredDirections = state.level >= 2 ? getRequiredPeripheralCount() : 0;
+
+  responseOverlay.classList.add("visible", "hold-wheel-mode");
+  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "peripheral-chooser", "feedback-mode");
+  choiceRow.classList.remove("combined", "split-keyboard");
+  choiceRow.classList.add("hold-wheel");
+  promptText.className = "";
+  promptText.textContent = state.level === 1 ? "Pick the center emoji." : "Hold emoji, drag to location, release.";
+  feedbackText.className = "";
+  feedbackText.textContent = getHoldWheelInstructionText();
+  choiceRow.innerHTML = "";
+
+  renderHoldWheelChoices();
+}
+
+function getHoldWheelInstructionText() {
+  if (state.level === 1) return "Click the matching emoji.";
+  const targetCount = getRequiredPeripheralCount();
+  const directionCount = getDirections().length;
+  return `${directionCount} slices match Direction count.${targetCount > 1 ? ` Drag through ${targetCount} target slices before release.` : " Release on the target slice."}`;
+}
+
+function renderHoldWheelChoices() {
+  choiceRow.innerHTML = "";
+  const board = document.createElement("div");
+  board.className = "hold-wheel-board";
+
+  const emojiRow = document.createElement("div");
+  emojiRow.className = "hold-wheel-emoji-row";
+  holdWheelResponse.centerChoices.forEach((choice, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hold-wheel-emoji-choice";
+    button.dataset.holdWheelCenterIndex = String(index);
+    button.innerHTML = `<strong>${choice}</strong><span>${state.level === 1 ? "Click" : "Hold"}</span>`;
+    button.addEventListener("click", (event) => {
+      if (state.level !== 1) return;
+      event.preventDefault();
+      event.stopPropagation();
+      submitHoldWheelCenterOnly(choice);
+    });
+    button.addEventListener("pointerdown", (event) => {
+      if (state.level < 2) return;
+      beginHoldWheelGesture(event, choice, button);
+    });
+    emojiRow.appendChild(button);
+  });
+
+  board.appendChild(emojiRow);
+  if (state.level >= 2) {
+    const hint = document.createElement("p");
+    hint.className = "hold-wheel-hint";
+    hint.textContent = getRequiredPeripheralCount() > 1
+      ? "Drag across each remembered target slice, then release."
+      : "Hold either emoji, move into the remembered slice, then release.";
+    board.appendChild(hint);
+  }
+
+  choiceRow.appendChild(board);
+  updateHoldWheelVisualState();
+}
+
+function submitHoldWheelCenterOnly(choice) {
+  if (!holdWheelResponse.active || responseLock) return;
+  state.response.center = choice;
+  finishTrial();
+}
+
+function beginHoldWheelGesture(event, choice, button) {
+  if (!holdWheelResponse.active || responseLock || state.level < 2) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  if (holdWheelResponse.selectedCenter !== choice) {
+    holdWheelResponse.selectedDirections = [];
+    state.response.peripherals = [];
+  }
+
+  holdWheelResponse.selectedCenter = choice;
+  holdWheelResponse.pointerId = event.pointerId;
+  holdWheelResponse.sourceButton = button;
+  holdWheelResponse.hoverDirection = null;
+  state.response.center = choice;
+
+  try {
+    button.setPointerCapture(event.pointerId);
+  } catch (_) {}
+
+  button.classList.add("dragging");
+  document.body.classList.add("hold-wheel-gesture-active");
+  window.addEventListener("pointermove", handleHoldWheelPointerMove, true);
+  window.addEventListener("pointerup", handleHoldWheelPointerUp, true);
+  window.addEventListener("pointercancel", cancelHoldWheelGesture, true);
+
+  showHoldWheel(event.clientX, event.clientY, choice);
+  updateHoldWheelFromPointer(event.clientX, event.clientY);
+  updateHoldWheelVisualState();
+}
+
+function showHoldWheel(clientX, clientY, centerEmoji) {
+  removeHoldWheelElement();
+
+  const diameter = clamp(Math.min(window.innerWidth, window.innerHeight) * 0.34, 214, 310);
+  const margin = diameter / 2 + 14;
+  const centerX = clamp(clientX, margin, window.innerWidth - margin);
+  const centerY = clamp(clientY, margin, window.innerHeight - margin);
+  holdWheelResponse.wheelCenter = { x: centerX, y: centerY };
+
+  const wheel = document.createElement("div");
+  wheel.className = "hold-wheel-popover";
+  wheel.style.setProperty("--hold-wheel-size", `${diameter}px`);
+  wheel.style.left = `${centerX}px`;
+  wheel.style.top = `${centerY}px`;
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("hold-wheel-svg");
+  svg.setAttribute("viewBox", "0 0 100 100");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("focusable", "false");
+
+  const labelGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  labelGroup.classList.add("hold-wheel-labels");
+
+  getDirections().forEach((direction) => {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.classList.add("hold-wheel-slice");
+    path.dataset.directionIndex = String(direction.index);
+    path.setAttribute("d", describeSectorPath(direction.angle, getSectorWidth(), 49));
+    svg.appendChild(path);
+
+    const labelPoint = svgPointFromDirection(50, 50, 38, direction.angle);
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.classList.add("hold-wheel-label");
+    label.dataset.directionIndex = String(direction.index);
+    label.setAttribute("x", labelPoint.x.toFixed(2));
+    label.setAttribute("y", labelPoint.y.toFixed(2));
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("dominant-baseline", "middle");
+    label.textContent = direction.label;
+    labelGroup.appendChild(label);
+  });
+
+  svg.appendChild(labelGroup);
+  wheel.appendChild(svg);
+
+  const center = document.createElement("div");
+  center.className = "hold-wheel-center";
+  center.textContent = centerEmoji;
+  wheel.appendChild(center);
+
+  const help = document.createElement("div");
+  help.className = "hold-wheel-floating-help";
+  help.textContent = getRequiredPeripheralCount() > 1 ? "drag through slices" : "release on slice";
+  wheel.appendChild(help);
+
+  document.body.appendChild(wheel);
+  holdWheelResponse.wheelElement = wheel;
+}
+
+function handleHoldWheelPointerMove(event) {
+  if (event.pointerId !== holdWheelResponse.pointerId) return;
+  event.preventDefault();
+  updateHoldWheelFromPointer(event.clientX, event.clientY);
+}
+
+function updateHoldWheelFromPointer(clientX, clientY) {
+  const direction = holdWheelDirectionFromPoint(clientX, clientY);
+  holdWheelResponse.hoverDirection = direction;
+
+  if (direction) {
+    if (holdWheelResponse.requiredDirections > 1) {
+      const alreadySelected = holdWheelResponse.selectedDirections.some((selected) => selected.index === direction.index);
+      if (!alreadySelected && holdWheelResponse.selectedDirections.length < holdWheelResponse.requiredDirections) {
+        holdWheelResponse.selectedDirections.push(direction);
+      }
+    } else {
+      holdWheelResponse.selectedDirections = [direction];
+    }
+    state.response.peripherals = holdWheelResponse.selectedDirections.slice(0, holdWheelResponse.requiredDirections);
+  }
+
+  updateHoldWheelVisualState();
+}
+
+function holdWheelDirectionFromPoint(clientX, clientY) {
+  const center = holdWheelResponse.wheelCenter;
+  const dx = clientX - center.x;
+  const dy = center.y - clientY;
+  const distance = Math.hypot(dx, dy);
+  const wheelSize = holdWheelResponse.wheelElement
+    ? holdWheelResponse.wheelElement.getBoundingClientRect().width
+    : 240;
+  if (distance < Math.max(28, wheelSize * 0.13)) return null;
+
+  const angle = ((Math.atan2(dy, dx) * 180) / Math.PI + 360) % 360;
+  return nearestDirectionByAngle(angle);
+}
+
+function handleHoldWheelPointerUp(event) {
+  if (event.pointerId !== holdWheelResponse.pointerId) return;
+  event.preventDefault();
+  finalizeHoldWheelGesture();
+}
+
+function finalizeHoldWheelGesture() {
+  const selectedCount = holdWheelResponse.selectedDirections.length;
+  const required = holdWheelResponse.requiredDirections;
+
+  cleanupHoldWheelGesture(false);
+
+  if (selectedCount >= required && required > 0) {
+    state.response.peripherals = holdWheelResponse.selectedDirections.slice(0, required);
+    finishTrial();
+    return;
+  }
+
+  promptText.textContent = "Release on the target slice.";
+  feedbackText.className = "";
+  feedbackText.textContent = required > 1
+    ? `${selectedCount}/${required} slices selected. Hold the emoji again and drag through the missing slice${required - selectedCount === 1 ? "" : "s"}.` 
+    : "Hold an emoji, drag out to a slice, then release.";
+  updateHoldWheelVisualState();
+}
+
+function cancelHoldWheelGesture(event) {
+  if (event && event.pointerId !== holdWheelResponse.pointerId) return;
+  cleanupHoldWheelGesture(true);
+}
+
+function cleanupHoldWheelGesture(cancelled) {
+  window.removeEventListener("pointermove", handleHoldWheelPointerMove, true);
+  window.removeEventListener("pointerup", handleHoldWheelPointerUp, true);
+  window.removeEventListener("pointercancel", cancelHoldWheelGesture, true);
+
+  if (holdWheelResponse.sourceButton) {
+    holdWheelResponse.sourceButton.classList.remove("dragging");
+    try {
+      if (holdWheelResponse.pointerId !== null) holdWheelResponse.sourceButton.releasePointerCapture(holdWheelResponse.pointerId);
+    } catch (_) {}
+  }
+
+  document.body.classList.remove("hold-wheel-gesture-active");
+  holdWheelResponse.pointerId = null;
+  holdWheelResponse.sourceButton = null;
+  holdWheelResponse.hoverDirection = null;
+  removeHoldWheelElement();
+
+  if (cancelled) updateHoldWheelVisualState();
+}
+
+function removeHoldWheelElement() {
+  if (holdWheelResponse.wheelElement) {
+    holdWheelResponse.wheelElement.remove();
+    holdWheelResponse.wheelElement = null;
+  }
+}
+
+function resetHoldWheelResponse() {
+  cleanupHoldWheelGesture(true);
+  removeHoldWheelElement();
+  holdWheelResponse = createHoldWheelResponseState();
+  if (choiceRow) choiceRow.classList.remove("hold-wheel");
+  if (responseOverlay) responseOverlay.classList.remove("hold-wheel-mode");
+}
+
+function updateHoldWheelVisualState() {
+  if (!choiceRow) return;
+
+  choiceRow.querySelectorAll(".hold-wheel-emoji-choice").forEach((button) => {
+    const index = Number(button.dataset.holdWheelCenterIndex);
+    const selected = holdWheelResponse.centerChoices[index] === holdWheelResponse.selectedCenter;
+    button.classList.toggle("selected", selected);
+  });
+
+  const hoveredIndex = holdWheelResponse.hoverDirection ? holdWheelResponse.hoverDirection.index : -1;
+  const selectedIndexes = new Set(holdWheelResponse.selectedDirections.map((direction) => direction.index));
+  const wheel = holdWheelResponse.wheelElement;
+  if (!wheel) return;
+
+  wheel.querySelectorAll(".hold-wheel-slice, .hold-wheel-label").forEach((element) => {
+    const directionIndex = Number(element.dataset.directionIndex);
+    element.classList.toggle("hovered", directionIndex === hoveredIndex);
+    element.classList.toggle("selected", selectedIndexes.has(directionIndex));
+  });
+}
+
+function isHoldWheelResponseActive() {
+  return holdWheelResponse.active && responseOverlay.classList.contains("hold-wheel-mode") && !responseLock;
 }
 
 function buildCombinedChoices() {
@@ -2068,8 +2356,8 @@ function presentPeripheralChooser() {
   state.awaitingPeripheral = true;
   state.response.peripherals = [];
   responseLock = true;
-  responseOverlay.classList.remove("combined-mode", "one-hand-mode");
-  choiceRow.classList.remove("combined", "one-hand");
+  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "hold-wheel-mode");
+  choiceRow.classList.remove("combined", "split-keyboard", "hold-wheel");
   choiceRow.innerHTML = "";
   responseOverlay.classList.remove("visible");
   responseOverlay.classList.add("peripheral-chooser");
@@ -2294,8 +2582,8 @@ function isPeripheralResponseCorrect() {
 }
 
 function showFeedback(correct, centerCorrect, peripheralCorrect) {
-  responseOverlay.classList.remove("combined-mode", "one-hand-mode");
-  choiceRow.classList.remove("combined", "one-hand");
+  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "hold-wheel-mode");
+  choiceRow.classList.remove("combined", "split-keyboard", "hold-wheel");
   responseOverlay.classList.add("visible", "feedback-mode");
   promptText.innerHTML = correct ? "Correct" : "Incorrect";
   promptText.className = correct ? "feedback-title correct" : "feedback-title incorrect";
@@ -2433,8 +2721,8 @@ function handleChoiceHotkey(event) {
   if (!getSettings().hotkeys) return false;
   if (responseLock) return false;
 
-  if (responseOverlay.classList.contains("one-hand-mode")) {
-    return handleOneHandHotkey(event);
+  if (responseOverlay.classList.contains("split-keyboard-mode")) {
+    return handleSplitKeyboardHotkey(event);
   }
 
   if (responseOverlay.classList.contains("combined-mode")) {
@@ -2517,7 +2805,7 @@ function handleKeyboard(event) {
     if (event.key === "Escape") closeHotkeyPanel();
     return;
   }
-  if (settings.hotkeys && isOneHandResponseActive() && handleChoiceHotkey(event)) {
+  if (settings.hotkeys && isSplitKeyboardResponseActive() && handleChoiceHotkey(event)) {
     event.preventDefault();
     return;
   }
@@ -2549,7 +2837,7 @@ function handleKeyboard(event) {
 }
 
 function handleKeyboardKeyup(event) {
-  if (isOneHandResponseActive() && setOneHandRefineFromKeyboard(event, false)) {
+  if (isSplitKeyboardResponseActive() && setSplitKeyboardRefineFromKeyboard(event, false)) {
     event.preventDefault();
   }
 }
@@ -2578,17 +2866,21 @@ function loadSettings() {
   } catch (_) {}
 }
 
-function migrateOneHandCounterClockwiseHotkey() {
-  if (!oneHandCounterClockwiseHotkeyInput) return;
-  if (normalizeHotkeyToken(oneHandCounterClockwiseHotkeyInput.value) === "v") {
-    oneHandCounterClockwiseHotkeyInput.value = DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY;
+function migrateSplitKeyboardSettings() {
+  if (!splitKeyboardEmojiHotkeysInput) return;
+  const current = normalizeHotkeyToken(splitKeyboardEmojiHotkeysInput.value);
+  if (current === "s" || current === "space,f") {
+    splitKeyboardEmojiHotkeysInput.value = DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS.join(",");
+  }
+  if (splitKeyboardCounterClockwiseHotkeyInput && normalizeHotkeyToken(splitKeyboardCounterClockwiseHotkeyInput.value) === "v") {
+    splitKeyboardCounterClockwiseHotkeyInput.value = DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY;
   }
 }
 
 function applySettingExplainers() {
   const explainers = {
     levelSelect: "Choose which task is trained: center only, center plus location, or center plus location with distractors.",
-    responseStyleSelect: "Two step keeps the old flow. Combined choices uses answer cards. One-hand keyboard uses S to cycle emoji plus QWE/AD/ZXC for fast no-mouse answers.",
+    responseStyleSelect: "Two step keeps the old flow. Combined choices uses answer cards. Split keyboard uses ←/→ plus QWE/AD/ZXC. Hold wheel uses click-hold-drag-release gestures.",
     stimulusAreaSelect: "Circle keeps targets in the ring. Full screen lets targets and distractors appear across the whole stage.",
     directionCountInput: "Controls how many direction slices are used for location choices.",
     choiceCountInput: "Controls how many combined answer cards appear when Combined choices is enabled.",
@@ -2683,10 +2975,9 @@ function closeHotkeyPanel() {
 function resetHotkeysToDefaults() {
   if (centerHotkeysInput) centerHotkeysInput.value = DEFAULT_CENTER_CHOICE_HOTKEYS.join(",");
   if (combinedHotkeysInput) combinedHotkeysInput.value = DEFAULT_COMBINED_CHOICE_HOTKEYS.join(",");
-  if (oneHandEmojiHotkeysInput) oneHandEmojiHotkeysInput.value = DEFAULT_ONE_HAND_EMOJI_HOTKEYS.join(",");
-  if (oneHandCenterSubmitHotkeyInput) oneHandCenterSubmitHotkeyInput.value = DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY;
-  if (oneHandClockwiseHotkeyInput) oneHandClockwiseHotkeyInput.value = DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY;
-  if (oneHandCounterClockwiseHotkeyInput) oneHandCounterClockwiseHotkeyInput.value = DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY;
+  if (splitKeyboardEmojiHotkeysInput) splitKeyboardEmojiHotkeysInput.value = DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS.join(",");
+  if (splitKeyboardClockwiseHotkeyInput) splitKeyboardClockwiseHotkeyInput.value = DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY;
+  if (splitKeyboardCounterClockwiseHotkeyInput) splitKeyboardCounterClockwiseHotkeyInput.value = DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY;
   if (directionHotkeysInput) directionHotkeysInput.value = DEFAULT_DIRECTION_HOTKEYS;
   if (pauseHotkeyInput) pauseHotkeyInput.value = DEFAULT_PAUSE_HOTKEY;
   if (skipHotkeyInput) skipHotkeyInput.value = DEFAULT_SKIP_HOTKEY;
@@ -2724,7 +3015,7 @@ function renderHotkeyPanel() {
 
   const centerHotkeys = parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS);
   const combinedHotkeys = parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS);
-  const oneHandEmojiHotkeys = parseHotkeyList(oneHandEmojiHotkeysInput, DEFAULT_ONE_HAND_EMOJI_HOTKEYS);
+  const splitKeyboardEmojiHotkeys = parseHotkeyList(splitKeyboardEmojiHotkeysInput, DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS);
 
   const generalGrid = createHotkeySection("General");
   addHotkeyButton(generalGrid, "Pause / resume", readHotkey(pauseHotkeyInput, DEFAULT_PAUSE_HOTKEY), (value) => {
@@ -2748,18 +3039,17 @@ function renderHotkeyPanel() {
     });
   }
 
-  const oneHandGrid = createHotkeySection("One-hand keyboard");
-  addHotkeyButton(oneHandGrid, "Cycle emoji", oneHandEmojiHotkeys[0] || DEFAULT_ONE_HAND_EMOJI_HOTKEYS[0], (value) => {
-    setIndexedHotkey(oneHandEmojiHotkeysInput, 0, value, DEFAULT_ONE_HAND_EMOJI_HOTKEYS);
+  const splitKeyboardGrid = createHotkeySection("Split keyboard");
+  for (let index = 0; index < 2; index += 1) {
+    addHotkeyButton(splitKeyboardGrid, `Emoji ${index + 1}`, splitKeyboardEmojiHotkeys[index] || DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS[index], (value) => {
+      setIndexedHotkey(splitKeyboardEmojiHotkeysInput, index, value, DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS);
+    });
+  }
+  addHotkeyButton(splitKeyboardGrid, "Refine clockwise", readHotkey(splitKeyboardClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY), (value) => {
+    if (splitKeyboardClockwiseHotkeyInput) splitKeyboardClockwiseHotkeyInput.value = serializeHotkeyToken(value);
   });
-  addHotkeyButton(oneHandGrid, "Confirm center", readHotkey(oneHandCenterSubmitHotkeyInput, DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY), (value) => {
-    if (oneHandCenterSubmitHotkeyInput) oneHandCenterSubmitHotkeyInput.value = serializeHotkeyToken(value);
-  });
-  addHotkeyButton(oneHandGrid, "Refine clockwise", readHotkey(oneHandClockwiseHotkeyInput, DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY), (value) => {
-    if (oneHandClockwiseHotkeyInput) oneHandClockwiseHotkeyInput.value = serializeHotkeyToken(value);
-  });
-  addHotkeyButton(oneHandGrid, "Refine counter", readHotkey(oneHandCounterClockwiseHotkeyInput, DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY), (value) => {
-    if (oneHandCounterClockwiseHotkeyInput) oneHandCounterClockwiseHotkeyInput.value = serializeHotkeyToken(value);
+  addHotkeyButton(splitKeyboardGrid, "Refine counter", readHotkey(splitKeyboardCounterClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY), (value) => {
+    if (splitKeyboardCounterClockwiseHotkeyInput) splitKeyboardCounterClockwiseHotkeyInput.value = serializeHotkeyToken(value);
   });
 
   const directionGrid = createHotkeySection("Directions");
@@ -2858,10 +3148,9 @@ const allSettingInputs = [
   hotkeysInput,
   centerHotkeysInput,
   combinedHotkeysInput,
-  oneHandEmojiHotkeysInput,
-  oneHandCenterSubmitHotkeyInput,
-  oneHandClockwiseHotkeyInput,
-  oneHandCounterClockwiseHotkeyInput,
+  splitKeyboardEmojiHotkeysInput,
+  splitKeyboardClockwiseHotkeyInput,
+  splitKeyboardCounterClockwiseHotkeyInput,
   directionHotkeysInput,
   pauseHotkeyInput,
   skipHotkeyInput,
@@ -2970,10 +3259,9 @@ resetSettingsButton.addEventListener("click", () => {
     hotkeysInput: true,
     centerHotkeysInput: "A,D",
     combinedHotkeysInput: "7,8,9,4,5,6,1,2,3,0",
-    oneHandEmojiHotkeysInput: "S",
-    oneHandCenterSubmitHotkeyInput: DEFAULT_ONE_HAND_CENTER_SUBMIT_HOTKEY,
-    oneHandClockwiseHotkeyInput: DEFAULT_ONE_HAND_CLOCKWISE_HOTKEY,
-    oneHandCounterClockwiseHotkeyInput: DEFAULT_ONE_HAND_COUNTER_CLOCKWISE_HOTKEY,
+    splitKeyboardEmojiHotkeysInput: "ArrowLeft,ArrowRight",
+    splitKeyboardClockwiseHotkeyInput: DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY,
+    splitKeyboardCounterClockwiseHotkeyInput: DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY,
     directionHotkeysInput: DEFAULT_DIRECTION_HOTKEYS,
     pauseHotkeyInput: DEFAULT_PAUSE_HOTKEY,
     skipHotkeyInput: DEFAULT_SKIP_HOTKEY,
@@ -3042,7 +3330,7 @@ function applyCalmField() {
 applyInputSteps();
 applySettingExplainers();
 loadSettings();
-migrateOneHandCounterClockwiseHotkey();
+migrateSplitKeyboardSettings();
 updateRangeSliderValue();
 updateLayout();
 applyCalmField();
