@@ -34,7 +34,6 @@ const levelSelect = document.getElementById("levelSelect");
 const responseStyleSelect = document.getElementById("responseStyleSelect");
 const stimulusAreaSelect = document.getElementById("stimulusAreaSelect");
 const directionCountInput = document.getElementById("directionCountInput");
-const choiceCountInput = document.getElementById("choiceCountInput");
 const autoProgressInput = document.getElementById("autoProgressInput");
 const trialsToCheckInput = document.getElementById("trialsToCheckInput");
 const rangeSlider = document.getElementById("rangeSlider");
@@ -56,7 +55,6 @@ const blurLettersInput = document.getElementById("blurLettersInput");
 const letterBlurInput = document.getElementById("letterBlurInput");
 const hotkeysInput = document.getElementById("hotkeysInput");
 const centerHotkeysInput = document.getElementById("centerHotkeysInput");
-const combinedHotkeysInput = document.getElementById("combinedHotkeysInput");
 const splitKeyboardEmojiHotkeysInput = document.getElementById("splitKeyboardEmojiHotkeysInput");
 const splitKeyboardClockwiseHotkeyInput = document.getElementById("splitKeyboardClockwiseHotkeyInput");
 const splitKeyboardCounterClockwiseHotkeyInput = document.getElementById("splitKeyboardCounterClockwiseHotkeyInput");
@@ -101,7 +99,6 @@ const TIMER_TRIAL_TARGET_KEY = "ufov_timer_trial_target";
 const TRIAL_GOAL_STATE_KEY = "ufov_trial_goal_state";
 const MOBILE_WARNING_SESSION_KEY = "ufov_mobile_warning_seen";
 const DEFAULT_CENTER_CHOICE_HOTKEYS = ["A", "D"];
-const DEFAULT_COMBINED_CHOICE_HOTKEYS = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "0"];
 const DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS = ["ArrowLeft", "ArrowRight"];
 const DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY = "R";
 const DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY = "F";
@@ -128,7 +125,6 @@ let activeHotkeyCapture = null;
 let splitKeyboardResponse = createSplitKeyboardResponseState();
 let activeSplitKeyboardRefine = null;
 let holdWheelResponse = createHoldWheelResponseState();
-let combinedArmedSlotIndex = null;
 
 function createInitialState() {
   const settings = getSettings();
@@ -208,7 +204,6 @@ function getSettings() {
     responseStyle: responseStyleSelect ? responseStyleSelect.value : "twoStep",
     stimulusArea: stimulusAreaSelect ? stimulusAreaSelect.value : "circle",
     directionCount,
-    choiceCount: readNumber(choiceCountInput, 10, 2, 16),
     autoProgress: autoProgressInput.checked,
     trialsToCheck: readNumber(trialsToCheckInput, 4, 1, 40),
     targetAccuracy: readNumber(targetAccuracyInput, 75, 50, 98) / 100,
@@ -231,7 +226,6 @@ function getSettings() {
     letterBlur: readNumber(letterBlurInput, 2.5, 0, 12),
     hotkeys: hotkeysInput ? hotkeysInput.checked : true,
     centerChoiceHotkeys: parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS),
-    combinedChoiceHotkeys: parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS),
     splitKeyboardEmojiHotkeys: parseHotkeyList(splitKeyboardEmojiHotkeysInput, DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS),
     splitKeyboardClockwiseHotkey: readHotkey(splitKeyboardClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY),
     splitKeyboardCounterClockwiseHotkey: readHotkey(splitKeyboardCounterClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY),
@@ -915,7 +909,7 @@ function pauseSessionAfterGoal(title, message) {
   state.paused = true;
   state.skippable = false;
   clearStage();
-  responseOverlay.classList.remove("combined-mode", "peripheral-chooser");
+  responseOverlay.classList.remove("peripheral-chooser");
   responseOverlay.classList.add("visible", "feedback-mode");
   promptText.className = "feedback-title correct";
   promptText.textContent = title;
@@ -1179,7 +1173,7 @@ function skipCurrentTrial() {
   state.trial = Math.max(0, state.trial - 1);
   state.levelTrial = Math.max(0, state.levelTrial - 1);
   clearStage();
-  responseOverlay.classList.remove("combined-mode", "peripheral-chooser");
+  responseOverlay.classList.remove("peripheral-chooser");
   responseOverlay.classList.add("visible", "feedback-mode");
   promptText.className = "feedback-title";
   promptText.textContent = "Skipped";
@@ -1270,7 +1264,6 @@ function clearStage() {
   hideMask();
   hideDirectionPreview();
   cleanupHoldWheelGesture(true);
-  clearCombinedArmedSlot();
   stage.classList.remove("selecting-location");
   removeSectors();
   removeSelectedSectorMarks();
@@ -1387,12 +1380,8 @@ function presentResponseControls() {
     presentHoldWheelResponse();
     return;
   }
-  if (state.level >= 2 && responseStyle === "combined") {
-    presentCombinedChoices();
-    return;
-  }
-  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "hold-wheel-mode");
-  choiceRow.classList.remove("combined", "split-keyboard", "hold-wheel");
+  responseOverlay.classList.remove("split-keyboard-mode", "hold-wheel-mode");
+  choiceRow.classList.remove("split-keyboard", "hold-wheel");
   responseLock = false;
   responseOverlay.classList.add("visible");
   responseOverlay.classList.remove("feedback-mode", "peripheral-chooser");
@@ -1423,72 +1412,6 @@ function presentResponseControls() {
   });
 }
 
-function presentCombinedChoices() {
-  responseLock = false;
-  combinedArmedSlotIndex = null;
-  responseOverlay.classList.add("visible");
-  responseOverlay.classList.remove("peripheral-chooser", "split-keyboard-mode", "hold-wheel-mode");
-  responseOverlay.classList.add("combined-mode");
-  choiceRow.classList.remove("split-keyboard", "hold-wheel");
-  choiceRow.classList.add("combined");
-  promptText.className = "";
-  promptText.textContent = "Pick the location, then the emoji.";
-  feedbackText.textContent = getSettings().hotkeys
-    ? "Click an emoji, or press a location key then A/D."
-    : "Click the emoji inside the matching location.";
-  choiceRow.innerHTML = "";
-
-  const choices = buildCombinedChoices();
-  const groups = groupCombinedChoicesBySlot(choices);
-  const spatialSlotCount = 9;
-
-  for (let slotIndex = 0; slotIndex < spatialSlotCount; slotIndex += 1) {
-    const group = groups.get(slotIndex) || [];
-    const gridArea = getCombinedChoiceGridArea(slotIndex);
-
-    if (!group.length) {
-      const placeholder = document.createElement("div");
-      placeholder.className = "combined-choice-placeholder";
-      placeholder.style.gridArea = gridArea;
-      choiceRow.appendChild(placeholder);
-      continue;
-    }
-
-    const slot = document.createElement("div");
-    slot.className = "combined-answer-slot";
-    slot.dataset.slotIndex = String(slotIndex);
-    slot.dataset.stackSize = String(group.length);
-    slot.style.gridArea = gridArea;
-
-    const orderedGroup = orderCombinedChoicesForSlot(group);
-    const slotHotkey = getCombinedSlotHotkey(slotIndex);
-    renderCombinedSlotPreview(slot, orderedGroup[0], slotHotkey);
-
-    const buttonRow = document.createElement("div");
-    buttonRow.className = "combined-emoji-row";
-
-    orderedGroup.forEach((choice, groupIndex) => {
-      const button = document.createElement("button");
-      button.className = "combined-emoji-choice";
-      button.type = "button";
-      const emojiHotkey = getCombinedEmojiHotkey(groupIndex);
-      button.dataset.combinedSlot = String(slotIndex);
-      button.dataset.emojiIndex = String(groupIndex);
-      button.title = `Click or press ${displayHotkey(emojiHotkey)}`;
-      renderCombinedEmojiChoice(button, choice, emojiHotkey);
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        submitCombinedChoice(choice);
-      });
-      buttonRow.appendChild(button);
-    });
-
-    slot.appendChild(buttonRow);
-    choiceRow.appendChild(slot);
-  }
- }
-
 function presentSplitKeyboardResponse() {
   responseLock = false;
   splitKeyboardResponse = createSplitKeyboardResponseState();
@@ -1498,8 +1421,8 @@ function presentSplitKeyboardResponse() {
   activeSplitKeyboardRefine = null;
 
   responseOverlay.classList.add("visible", "split-keyboard-mode");
-  responseOverlay.classList.remove("combined-mode", "hold-wheel-mode", "peripheral-chooser", "feedback-mode");
-  choiceRow.classList.remove("combined", "hold-wheel");
+  responseOverlay.classList.remove("hold-wheel-mode", "peripheral-chooser", "feedback-mode");
+  choiceRow.classList.remove("hold-wheel");
   choiceRow.classList.add("split-keyboard");
   promptText.className = "";
   promptText.textContent = state.level === 1 ? "Pick the center emoji." : "Arrow keys pick emoji, then tap direction.";
@@ -1806,8 +1729,8 @@ function presentHoldWheelResponse() {
   holdWheelResponse.requiredDirections = state.level >= 2 ? getRequiredPeripheralCount() : 0;
 
   responseOverlay.classList.add("visible", "hold-wheel-mode");
-  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "peripheral-chooser", "feedback-mode");
-  choiceRow.classList.remove("combined", "split-keyboard");
+  responseOverlay.classList.remove("split-keyboard-mode", "peripheral-chooser", "feedback-mode");
+  choiceRow.classList.remove("split-keyboard");
   choiceRow.classList.add("hold-wheel");
   promptText.className = "";
   promptText.textContent = state.level === 1 ? "Pick the center emoji." : "Hold emoji, drag to location, release.";
@@ -2093,218 +2016,6 @@ function isHoldWheelResponseActive() {
   return holdWheelResponse.active && responseOverlay.classList.contains("hold-wheel-mode") && !responseLock;
 }
 
-function buildCombinedChoices() {
-  const settings = getSettings();
-  const count = Math.min(settings.choiceCount, 16);
-  const correctDirections = state.current.directions || [state.current.direction];
-  const targetCount = getRequiredPeripheralCount();
-  const choices = [];
-  const seen = new Set();
-  const addChoice = (center, directions) => {
-    const key = `${center}|${directionSetKey(directions)}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    choices.push({ center, directions });
-  };
-  addChoice(state.current.center, correctDirections);
-  const correctChoice = choices[0];
-  addChoice(state.current.decoy, correctDirections);
-
-  const distractorDirectionSets = getSpatialDistractorDirectionSets(targetCount, correctDirections);
-  let alternateCenter = 0;
-  while (choices.length < count && distractorDirectionSets.length) {
-    const center = alternateCenter % 2 === 0 ? state.current.center : state.current.decoy;
-    addChoice(center, distractorDirectionSets.shift());
-    alternateCenter += 1;
-  }
-
-  while (choices.length < count) {
-    const center = Math.random() < 0.55 ? randomItem([state.current.center, state.current.decoy]) : randomItem(emojiPool);
-    addChoice(center, randomDirectionSet(targetCount, Math.random() < 0.35 ? correctDirections : []));
-  }
-
-  return sortCombinedChoicesSpatially([correctChoice, ...choices.filter((choice) => choice !== correctChoice)].slice(0, count));
-}
-
-function getSpatialDistractorDirectionSets(count, correctDirections) {
-  const correctKey = directionSetKey(correctDirections);
-  const directions = getDirections();
-  const seen = new Set([correctKey]);
-
-  if (count <= 1) {
-    return shuffle(directions)
-      .map((direction) => [direction])
-      .filter((set) => directionSetKey(set) !== correctKey);
-  }
-
-  const sets = [];
-  for (let attempt = 0; attempt < 160 && sets.length < directions.length * 2; attempt += 1) {
-    const set = shuffle(directions).slice(0, count);
-    const key = directionSetKey(set);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    sets.push(set);
-  }
-  return sets;
-}
-
-function getCombinedChoicePrimaryDirection(choice) {
-  return choice.directions && choice.directions[0] ? choice.directions[0] : getDirections()[0];
-}
-
-function getCombinedChoiceGridSlot(direction) {
-  const radians = (direction.angle * Math.PI) / 180;
-  return {
-    column: clamp(Math.round(2 + Math.cos(radians)), 1, 3),
-    row: clamp(Math.round(2 - Math.sin(radians)), 1, 3)
-  };
-}
-
-function sortCombinedChoicesSpatially(choices) {
-  return choices.slice().sort((a, b) => {
-    const directionA = getCombinedChoicePrimaryDirection(a);
-    const directionB = getCombinedChoicePrimaryDirection(b);
-    const slotA = getCombinedChoiceGridSlot(directionA);
-    const slotB = getCombinedChoiceGridSlot(directionB);
-
-    if (slotA.row !== slotB.row) return slotA.row - slotB.row;
-    if (slotA.column !== slotB.column) return slotA.column - slotB.column;
-    if (directionA.index !== directionB.index) return directionA.index - directionB.index;
-    return (a.center || "").localeCompare(b.center || "");
-  });
-}
-
-function getCombinedChoiceGridArea(index) {
-  const areas = ["slot0", "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9"];
-  return areas[index] || areas[areas.length - 1];
-}
-
-function getCombinedChoiceSlotIndex(choice) {
-  const direction = getCombinedChoicePrimaryDirection(choice);
-  const slot = getCombinedChoiceGridSlot(direction);
-  return (slot.row - 1) * 3 + (slot.column - 1);
-}
-
-function groupCombinedChoicesBySlot(choices) {
-  const groups = new Map();
-  choices.forEach((choice) => {
-    const slotIndex = getCombinedChoiceSlotIndex(choice);
-    if (!groups.has(slotIndex)) groups.set(slotIndex, []);
-    groups.get(slotIndex).push(choice);
-  });
-  return groups;
-}
-
-function orderCombinedChoicesForSlot(choices) {
-  return shuffle(choices);
-}
-
-function getCombinedSlotHotkey(slotIndex) {
-  const configured = getSettings().combinedChoiceHotkeys;
-  return configured[slotIndex] || DEFAULT_COMBINED_CHOICE_HOTKEYS[slotIndex] || String(slotIndex + 1);
-}
-
-function getCombinedEmojiHotkey(index) {
-  const hotkeys = getSettings().centerChoiceHotkeys;
-  return hotkeys[index] || String(index + 1);
-}
-
-function renderCombinedSlotPreview(slot, choice, slotHotkey) {
-  const preview = document.createElement("div");
-  preview.className = `mini-stage combined-slot-preview ${getSettings().stimulusArea === "full" ? "full-field" : ""}`;
-  choice.directions.forEach((direction) => {
-    const sector = document.createElement("span");
-    sector.className = "mini-sector";
-    sector.style.setProperty("--sector-width", `${getSectorWidth()}deg`);
-    sector.style.setProperty("--sector-offset", `${-getSectorWidth() / 2}deg`);
-    sector.style.transform = `translate(-50%, -50%) rotate(${90 - direction.angle}deg)`;
-    preview.appendChild(sector);
-  });
-
-  const centerMarker = document.createElement("span");
-  centerMarker.className = "mini-center combined-location-dot";
-  centerMarker.textContent = "+";
-  preview.appendChild(centerMarker);
-
-  const label = document.createElement("div");
-  label.className = "combined-slot-label";
-  label.innerHTML = `<span>${choice.directions.map((direction) => direction.label).join("+")}</span><span class="hotkey-hint">${displayHotkey(slotHotkey)}</span>`;
-
-  slot.appendChild(preview);
-  slot.appendChild(label);
-}
-
-function renderCombinedEmojiChoice(button, choice, emojiHotkey) {
-  const emoji = document.createElement("span");
-  emoji.className = "combined-emoji";
-  emoji.textContent = choice.center;
-
-  const hint = document.createElement("span");
-  hint.className = "hotkey-hint";
-  hint.textContent = displayHotkey(emojiHotkey);
-
-  button.appendChild(emoji);
-  button.appendChild(hint);
-}
-
-function getCombinedSlotIndexFromHotkey(event) {
-  const hotkeys = Array.from({ length: 9 }, (_, index) => getCombinedSlotHotkey(index));
-  return findHotkeyIndex(event, hotkeys);
-}
-
-function getCombinedSlotButtons(slotIndex) {
-  return Array.from(choiceRow.querySelectorAll(`.combined-emoji-choice[data-combined-slot="${slotIndex}"]`));
-}
-
-function clearCombinedArmedSlot() {
-  combinedArmedSlotIndex = null;
-  choiceRow.querySelectorAll(".combined-answer-slot.keyboard-armed").forEach((slot) => {
-    slot.classList.remove("keyboard-armed");
-  });
-}
-
-function armCombinedSlot(slotIndex) {
-  clearCombinedArmedSlot();
-  combinedArmedSlotIndex = slotIndex;
-  const slot = choiceRow.querySelector(`.combined-answer-slot[data-slot-index="${slotIndex}"]`);
-  if (slot) slot.classList.add("keyboard-armed");
-
-  const labels = getCombinedSlotButtons(slotIndex)
-    .map((button, index) => `${displayHotkey(getCombinedEmojiHotkey(index))} ${button.querySelector(".combined-emoji")?.textContent || ""}`)
-    .join(" · ");
-  feedbackText.textContent = labels ? `Location selected. Press ${labels}.` : "Location selected.";
-}
-
-function handleCombinedChoiceHotkey(event) {
-  const emojiHotkeyIndex = combinedArmedSlotIndex !== null
-    ? findHotkeyIndex(event, getSettings().centerChoiceHotkeys)
-    : -1;
-
-  if (combinedArmedSlotIndex !== null && emojiHotkeyIndex >= 0) {
-    const buttons = getCombinedSlotButtons(combinedArmedSlotIndex);
-    const button = buttons[emojiHotkeyIndex];
-    if (!button) return false;
-    clearCombinedArmedSlot();
-    button.click();
-    return true;
-  }
-
-  const slotIndex = getCombinedSlotIndexFromHotkey(event);
-  if (slotIndex < 0) return false;
-
-  const buttons = getCombinedSlotButtons(slotIndex);
-  if (!buttons.length) return false;
-
-  if (buttons.length === 1) {
-    clearCombinedArmedSlot();
-    buttons[0].click();
-    return true;
-  }
-
-  armCombinedSlot(slotIndex);
-  return true;
-}
-
 function randomDirectionSet(count, avoid = []) {
   const avoidKey = directionSetKey(avoid);
   const directions = getDirections();
@@ -2313,36 +2024,6 @@ function randomDirectionSet(count, avoid = []) {
     if (!avoid.length || directionSetKey(picked) !== avoidKey) return picked;
   }
   return shuffle(directions).slice(0, count);
-}
-
-function renderCombinedChoice(button, choice, hotkey) {
-  const stageMini = document.createElement("span");
-  stageMini.className = `mini-stage ${getSettings().stimulusArea === "full" ? "full-field" : ""}`;
-  choice.directions.forEach((direction) => {
-    const sector = document.createElement("span");
-    sector.className = "mini-sector";
-    sector.style.setProperty("--sector-width", `${getSectorWidth()}deg`);
-    sector.style.setProperty("--sector-offset", `${-getSectorWidth() / 2}deg`);
-    sector.style.transform = `translate(-50%, -50%) rotate(${90 - direction.angle}deg)`;
-    stageMini.appendChild(sector);
-  });
-  const center = document.createElement("span");
-  center.className = "mini-center";
-  center.textContent = choice.center;
-  stageMini.appendChild(center);
-  const label = document.createElement("span");
-  label.className = "combined-label";
-  label.innerHTML = `<span>${choice.directions.map((direction) => direction.label).join("+")}</span><span class="hotkey-hint">${displayHotkey(hotkey)}</span>`;
-  button.appendChild(stageMini);
-  button.appendChild(label);
-}
-
-function submitCombinedChoice(choice) {
-  if (responseLock) return;
-  clearCombinedArmedSlot();
-  state.response.center = choice.center;
-  state.response.peripherals = choice.directions;
-  finishTrial();
 }
 
 function submitCenter(choice) {
@@ -2356,8 +2037,8 @@ function presentPeripheralChooser() {
   state.awaitingPeripheral = true;
   state.response.peripherals = [];
   responseLock = true;
-  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "hold-wheel-mode");
-  choiceRow.classList.remove("combined", "split-keyboard", "hold-wheel");
+  responseOverlay.classList.remove("split-keyboard-mode", "hold-wheel-mode");
+  choiceRow.classList.remove("split-keyboard", "hold-wheel");
   choiceRow.innerHTML = "";
   responseOverlay.classList.remove("visible");
   responseOverlay.classList.add("peripheral-chooser");
@@ -2545,7 +2226,6 @@ function finishTrial() {
   responseLock = true;
   state.skippable = false;
   hideDirectionPreview();
-  clearCombinedArmedSlot();
   stage.classList.remove("selecting-location");
   responseOverlay.classList.remove("visible", "peripheral-chooser");
   state.awaitingPeripheral = false;
@@ -2582,8 +2262,8 @@ function isPeripheralResponseCorrect() {
 }
 
 function showFeedback(correct, centerCorrect, peripheralCorrect) {
-  responseOverlay.classList.remove("combined-mode", "split-keyboard-mode", "hold-wheel-mode");
-  choiceRow.classList.remove("combined", "split-keyboard", "hold-wheel");
+  responseOverlay.classList.remove("split-keyboard-mode", "hold-wheel-mode");
+  choiceRow.classList.remove("split-keyboard", "hold-wheel");
   responseOverlay.classList.add("visible", "feedback-mode");
   promptText.innerHTML = correct ? "Correct" : "Incorrect";
   promptText.className = correct ? "feedback-title correct" : "feedback-title incorrect";
@@ -2723,16 +2403,6 @@ function handleChoiceHotkey(event) {
 
   if (responseOverlay.classList.contains("split-keyboard-mode")) {
     return handleSplitKeyboardHotkey(event);
-  }
-
-  if (responseOverlay.classList.contains("combined-mode")) {
-    const variants = eventHotkeyVariants(event);
-    const button = Array.from(choiceRow.querySelectorAll("[data-hotkey]")).find((candidate) => {
-      return variants.has(normalizeHotkeyToken(candidate.dataset.hotkey));
-    });
-    if (!button) return false;
-    button.click();
-    return true;
   }
 
   const settings = getSettings();
@@ -2880,10 +2550,9 @@ function migrateSplitKeyboardSettings() {
 function applySettingExplainers() {
   const explainers = {
     levelSelect: "Choose which task is trained: center only, center plus location, or center plus location with distractors.",
-    responseStyleSelect: "Two step keeps the old flow. Combined choices uses answer cards. Split keyboard uses ←/→ plus QWE/AD/ZXC. Hold wheel uses click-hold-drag-release gestures.",
+    responseStyleSelect: "Two step keeps the old flow. Split keyboard uses ←/→ plus QWE/AD/ZXC. Hold wheel uses click-hold-drag-release gestures.",
     stimulusAreaSelect: "Circle keeps targets in the ring. Full screen lets targets and distractors appear across the whole stage.",
     directionCountInput: "Controls how many direction slices are used for location choices.",
-    choiceCountInput: "Controls how many combined answer cards appear when Combined choices is enabled.",
     autoProgressInput: "Automatically makes flash duration harder or easier based on recent accuracy.",
     trialsToCheckInput: "Number of recent trials used before changing difficulty.",
     targetAccuracyInput: "Accuracy needed to make the flash faster.",
@@ -2974,7 +2643,6 @@ function closeHotkeyPanel() {
 
 function resetHotkeysToDefaults() {
   if (centerHotkeysInput) centerHotkeysInput.value = DEFAULT_CENTER_CHOICE_HOTKEYS.join(",");
-  if (combinedHotkeysInput) combinedHotkeysInput.value = DEFAULT_COMBINED_CHOICE_HOTKEYS.join(",");
   if (splitKeyboardEmojiHotkeysInput) splitKeyboardEmojiHotkeysInput.value = DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS.join(",");
   if (splitKeyboardClockwiseHotkeyInput) splitKeyboardClockwiseHotkeyInput.value = DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY;
   if (splitKeyboardCounterClockwiseHotkeyInput) splitKeyboardCounterClockwiseHotkeyInput.value = DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY;
@@ -3014,7 +2682,6 @@ function renderHotkeyPanel() {
   if (hotkeyHelp) hotkeyHelp.textContent = "Click a key button, then press the new key. Esc cancels capture.";
 
   const centerHotkeys = parseHotkeyList(centerHotkeysInput, DEFAULT_CENTER_CHOICE_HOTKEYS);
-  const combinedHotkeys = parseHotkeyList(combinedHotkeysInput, DEFAULT_COMBINED_CHOICE_HOTKEYS);
   const splitKeyboardEmojiHotkeys = parseHotkeyList(splitKeyboardEmojiHotkeysInput, DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS);
 
   const generalGrid = createHotkeySection("General");
@@ -3029,13 +2696,6 @@ function renderHotkeyPanel() {
   for (let index = 0; index < 2; index += 1) {
     addHotkeyButton(centerGrid, `Choice ${index + 1}`, centerHotkeys[index] || DEFAULT_CENTER_CHOICE_HOTKEYS[index], (value) => {
       setIndexedHotkey(centerHotkeysInput, index, value, DEFAULT_CENTER_CHOICE_HOTKEYS);
-    });
-  }
-
-  const combinedGrid = createHotkeySection("Combined choices");
-  for (let index = 0; index < 10; index += 1) {
-    addHotkeyButton(combinedGrid, `Card ${index + 1}`, combinedHotkeys[index] || DEFAULT_COMBINED_CHOICE_HOTKEYS[index], (value) => {
-      setIndexedHotkey(combinedHotkeysInput, index, value, DEFAULT_COMBINED_CHOICE_HOTKEYS);
     });
   }
 
@@ -3127,7 +2787,6 @@ const allSettingInputs = [
   responseStyleSelect,
   stimulusAreaSelect,
   directionCountInput,
-  choiceCountInput,
   autoProgressInput,
   trialsToCheckInput,
   targetAccuracyInput,
@@ -3147,7 +2806,6 @@ const allSettingInputs = [
   letterBlurInput,
   hotkeysInput,
   centerHotkeysInput,
-  combinedHotkeysInput,
   splitKeyboardEmojiHotkeysInput,
   splitKeyboardClockwiseHotkeyInput,
   splitKeyboardCounterClockwiseHotkeyInput,
@@ -3238,7 +2896,6 @@ resetSettingsButton.addEventListener("click", () => {
     responseStyleSelect: "twoStep",
     stimulusAreaSelect: "circle",
     directionCountInput: "8",
-    choiceCountInput: "10",
     autoProgressInput: true,
     trialsToCheckInput: "4",
     targetAccuracyInput: "75",
@@ -3258,7 +2915,6 @@ resetSettingsButton.addEventListener("click", () => {
     letterBlurInput: "2.5",
     hotkeysInput: true,
     centerHotkeysInput: "A,D",
-    combinedHotkeysInput: "7,8,9,4,5,6,1,2,3,0",
     splitKeyboardEmojiHotkeysInput: "ArrowLeft,ArrowRight",
     splitKeyboardClockwiseHotkeyInput: DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY,
     splitKeyboardCounterClockwiseHotkeyInput: DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY,
@@ -3290,12 +2946,6 @@ resetSettingsButton.addEventListener("click", () => {
   saveSettings();
 });
 
-function updateChoiceCountVisibility() {
-  const label = document.getElementById("choiceCountLabel");
-  if (!label) return;
-  const isCombined = responseStyleSelect && responseStyleSelect.value === "combined";
-  label.classList.toggle("hidden", !isCombined);
-}
 
 function initializeMobileWarning() {
   if (!mobileWarning || !mobileWarningContinue) return;
@@ -3339,6 +2989,3 @@ renderHotkeyPanel();
 initializeTimerControls();
 initializeMobileWarning();
 updateStats();
-updateChoiceCountVisibility();
-
-responseStyleSelect.addEventListener("change", updateChoiceCountVisibility);
