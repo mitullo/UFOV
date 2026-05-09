@@ -42,29 +42,43 @@
         <button class="icon-button" id="settingsButton">Settings</button>
       </div>
 
-      <section class="timer-panel hidden" id="timerPanel" role="dialog" aria-modal="true" aria-labelledby="timerPanelTitle">
+      <section class="timer-panel hidden" id="timerPanel" role="dialog" aria-modal="false" aria-labelledby="timerPanelTitle">
         <div class="timer-card">
           <div class="timer-card-header">
             <div>
-              <span class="timer-kicker">Session timer</span>
-              <h2 id="timerPanelTitle">Train for a set time</h2>
+              <span class="timer-kicker">Goal</span>
+              <h2 id="timerPanelTitle">Session goal</h2>
             </div>
             <button type="button" class="timer-close" id="timerCloseButton" aria-label="Close timer">&times;</button>
           </div>
 
-          <p class="timer-copy">The countdown only runs while the session is active. Pausing the app also pauses the timer.</p>
+          <p class="timer-copy">Pick time, all trials, or correct trials. It only counts while training is active.</p>
 
           <label class="timer-field">
+            Goal type
+            <select id="timerGoalModeSelect">
+              <option value="time">Time</option>
+              <option value="allTrials">All trials</option>
+              <option value="correctTrials">Correct trials</option>
+            </select>
+          </label>
+
+          <label class="timer-field" id="timerMinutesField">
             Minutes
             <input type="number" id="timerMinutesInput" min="1" max="240" step="1" value="15" inputmode="numeric" />
           </label>
 
+          <label class="timer-field hidden" id="timerTrialsField">
+            Trials
+            <input type="number" id="timerTrialsInput" min="1" max="999" step="1" value="50" inputmode="numeric" />
+          </label>
+
           <div class="timer-actions">
-            <button type="button" class="primary-button" id="timerSetButton">Set timer</button>
+            <button type="button" class="primary-button" id="timerSetButton">Set goal</button>
             <button type="button" class="secondary-button" id="timerClearButton">Clear</button>
           </div>
 
-          <strong class="timer-status" id="timerStatusText">No timer set.</strong>
+          <strong class="timer-status" id="timerStatusText">No goal set.</strong>
         </div>
       </section>
 

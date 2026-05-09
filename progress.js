@@ -1,13 +1,19 @@
 window.UFOVProgress = (() => {
   const STORAGE_KEY = "ufov_progress_checks";
+  const SESSION_STORAGE_KEY = "ufov_progress_sessions";
   const MAX_RECORDS = 300;
+  const MAX_SESSIONS = 80;
+  const CHART_BUCKET_MS = 8 * 60 * 60 * 1000;
 
   let modal = null;
   let activeTab = "recent";
   let chartTooltip = null;
   let chartHoverPoints = [];
+  let chartRenderFrame = null;
+  let chartResizeObserver = null;
+  let expandedSessions = new Set();
 
-  const CHART_Y_MIN = -5;
+  const CHART_Y_MIN = -8;
   const CHART_Y_MAX = 105;
 
   function loadHistory() {
@@ -23,6 +29,39 @@ window.UFOVProgress = (() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(history.slice(-MAX_RECORDS)));
     } catch (_) {}
+  }
+
+  function loadSessions() {
+    try {
+      const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function saveSessions(sessions) {
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions.slice(-MAX_SESSIONS)));
+    } catch (_) {}
+  }
+
+  function recordSession(session) {
+    if (!session || !Array.isArray(session.trials) || !session.trials.length) return;
+
+    const sessions = loadSessions();
+    const id = session.id || (window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : String(Date.now() + Math.random()));
+
+    sessions.push({
+      ...session,
+      id,
+      type: "session",
+      date: session.endDate || Date.now()
+    });
+
+    saveSessions(sessions);
   }
 
   function recordCheck(record) {
@@ -118,6 +157,16 @@ window.UFOVProgress = (() => {
     if (chartCanvas) {
       chartCanvas.addEventListener("pointermove", handleChartHover);
       chartCanvas.addEventListener("pointerleave", hideChartTooltip);
+
+      const chartWrap = chartCanvas.closest(".chart-wrap");
+      if (chartWrap && "ResizeObserver" in window) {
+        chartResizeObserver = new ResizeObserver(() => {
+          if (activeTab === "chart" && modal && !modal.classList.contains("hidden")) {
+            queueChartRender(loadHistory());
+          }
+        });
+        chartResizeObserver.observe(chartWrap);
+      }
     }
 
     modal.querySelector(".progress-close").addEventListener("click", close);
@@ -137,90 +186,242 @@ window.UFOVProgress = (() => {
   function open() {
     createModal();
     modal.classList.remove("hidden");
+    syncActiveTabUi();
     render();
   }
 
   function close() {
     if (!modal) return;
+    if (chartRenderFrame !== null) {
+      cancelAnimationFrame(chartRenderFrame);
+      chartRenderFrame = null;
+    }
+    hideChartTooltip();
     modal.classList.add("hidden");
   }
 
   function clearHistory() {
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(SESSION_STORAGE_KEY);
     } catch (_) {}
+    expandedSessions = new Set();
     render();
   }
 
   function setTab(tab) {
     activeTab = tab;
 
+    syncActiveTabUi();
+    render();
+  }
+
+  function syncActiveTabUi() {
+    if (!modal) return;
+
     modal.querySelectorAll(".progress-tab").forEach((button) => {
-      button.classList.toggle("active", button.dataset.tab === tab);
+      button.classList.toggle("active", button.dataset.tab === activeTab);
     });
 
     modal.querySelectorAll(".progress-panel").forEach((panel) => {
-      panel.classList.toggle("hidden", panel.dataset.panel !== tab);
+      panel.classList.toggle("hidden", panel.dataset.panel !== activeTab);
     });
-
-    render();
   }
 
   function render() {
     const history = loadHistory();
+    const sessions = loadSessions();
 
     hideChartTooltip();
-    renderTable(history);
+    renderTable(history, sessions);
 
     if (activeTab === "chart") {
-      requestAnimationFrame(() => renderChart(history));
+      queueChartRender(history);
     }
   }
 
-  function renderTable(history) {
+  function queueChartRender(history) {
+    if (chartRenderFrame !== null) {
+      cancelAnimationFrame(chartRenderFrame);
+      chartRenderFrame = null;
+    }
+
+    chartRenderFrame = requestAnimationFrame(() => {
+      chartRenderFrame = requestAnimationFrame(() => {
+        chartRenderFrame = null;
+        renderChart(history);
+      });
+    });
+  }
+
+  function renderTable(history, sessions = []) {
     const body = document.getElementById("progressTableBody");
     if (!body) return;
 
-    const rows = history.slice(-80).reverse();
+    const items = [
+      ...history.map((row) => ({ ...row, type: "check", date: row.date || 0 })),
+      ...sessions.map((session) => ({ ...session, type: "session", date: session.endDate || session.date || 0 }))
+    ]
+      .sort((a, b) => Number(b.date || 0) - Number(a.date || 0))
+      .slice(0, 120);
 
-    if (!rows.length) {
+    if (!items.length) {
       body.innerHTML = `
         <tr>
-          <td colspan="9" class="empty-progress">No progress checks yet.</td>
+          <td colspan="9" class="empty-progress">No progress checks or completed sessions yet.</td>
         </tr>
       `;
       return;
     }
 
-    body.innerHTML = rows.map((row) => {
-      const actionLabel = getActionLabel(row.action);
-      const actionClass = getActionClass(row.action);
-
-      return `
-        <tr>
-          <td>${formatRelativeDate(row.date)}</td>
-          <td>${escapeHtml(row.modeName || `Mode ${row.mode}`)}</td>
-          <td>${escapeHtml(formatSettings(row))}</td>
-          <td>${row.correctCount}/${row.trials}</td>
-          <td>${Math.round(row.flashBefore) === Math.round(row.flashAfter) ? `${Math.round(row.flashAfter)}ms` : `${Math.round(row.flashBefore)}ms → ${Math.round(row.flashAfter)}ms`}</td>
-          <td><span class="badge-score ${scoreClass(row.accuracy)}">${Math.round(row.accuracy)}%</span></td>
-          <td><span class="badge-score ${scoreClass(row.centerAccuracy)}">${Math.round(row.centerAccuracy)}%</span></td>
-          <td><span class="badge-score ${scoreClass(row.peripheralAccuracy)}">${formatPeripheral(row)}</span></td>
-          <td><span class="progress-action ${actionClass}">${actionLabel}</span></td>
-        </tr>
-      `;
+    body.innerHTML = items.map((item) => {
+      if (item.type === "session") return renderSessionRow(item);
+      return renderCheckRow(item);
     }).join("");
+
+    body.querySelectorAll(".progress-session-row").forEach((row) => {
+      const toggle = () => {
+        const sessionId = row.dataset.sessionId;
+        if (!sessionId) return;
+        if (expandedSessions.has(sessionId)) expandedSessions.delete(sessionId);
+        else expandedSessions.add(sessionId);
+        render();
+      };
+
+      row.addEventListener("click", toggle);
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggle();
+      });
+    });
+  }
+
+  function renderCheckRow(row) {
+    const actionLabel = getActionLabel(row.action);
+    const actionClass = getActionClass(row.action);
+
+    return `
+      <tr class="progress-check-row">
+        <td>${formatRelativeDate(row.date)}</td>
+        <td>${escapeHtml(row.modeName || `Mode ${row.mode}`)}</td>
+        <td>${escapeHtml(formatSettings(row))}</td>
+        <td>${row.correctCount}/${row.trials}</td>
+        <td>${formatFlashChange(row.flashBefore, row.flashAfter)}</td>
+        <td><span class="badge-score ${scoreClass(row.accuracy)}">${Math.round(row.accuracy)}%</span></td>
+        <td><span class="badge-score ${scoreClass(row.centerAccuracy)}">${Math.round(row.centerAccuracy)}%</span></td>
+        <td><span class="badge-score ${scoreClass(row.peripheralAccuracy)}">${formatPeripheral(row)}</span></td>
+        <td><span class="progress-action ${actionClass}">${actionLabel}</span></td>
+      </tr>
+    `;
+  }
+
+  function renderSessionRow(session) {
+    const expanded = expandedSessions.has(session.id);
+    const goal = formatSessionGoal(session);
+    const settings = formatSettings(session);
+    const total = Number(session.total || (session.trials ? session.trials.length : 0));
+    const correctCount = Number(session.correctCount || 0);
+    const duration = formatDuration(session.durationMs || ((session.endDate || session.date || 0) - (session.startDate || session.date || 0)));
+    const details = expanded ? renderSessionDetails(session) : "";
+
+    return `
+      <tr class="progress-session-row ${expanded ? "expanded" : ""}" data-session-id="${escapeHtml(session.id)}" tabindex="0" role="button" aria-expanded="${expanded ? "true" : "false"}">
+        <td><span class="session-caret">${expanded ? "▾" : "▸"}</span>${formatRelativeDate(session.date)}</td>
+        <td><span class="session-pill">Session</span> ${escapeHtml(session.modeName || `Mode ${session.mode}`)}</td>
+        <td><strong>${escapeHtml(goal)}</strong><span class="session-subline">${escapeHtml(settings)}</span></td>
+        <td>${correctCount}/${total}</td>
+        <td>${formatFlashChange(session.flashBefore, session.flashAfter)}</td>
+        <td><span class="badge-score ${scoreClass(session.accuracy)}">${Math.round(session.accuracy || 0)}%</span></td>
+        <td><span class="badge-score ${scoreClass(session.centerAccuracy)}">${Math.round(session.centerAccuracy || 0)}%</span></td>
+        <td><span class="badge-score ${scoreClass(session.peripheralAccuracy)}">${formatPeripheral(session)}</span></td>
+        <td><span class="progress-action session-complete">Done · ${escapeHtml(duration)}</span></td>
+      </tr>
+      ${details}
+    `;
+  }
+
+  function renderSessionDetails(session) {
+    const trials = Array.isArray(session.trials) ? session.trials : [];
+
+    return `
+      <tr class="progress-session-details">
+        <td colspan="9">
+          <div class="session-detail-card">
+            <div class="session-detail-head">
+              <strong>${escapeHtml(formatSessionGoal(session))}</strong>
+              <span>${trials.length} trial${trials.length === 1 ? "" : "s"} · ${escapeHtml(formatAbsoluteDate(session.startDate || session.date))}</span>
+            </div>
+            <div class="session-trial-list">
+              ${trials.map(renderSessionTrial).join("")}
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+
+  function renderSessionTrial(trial) {
+    const center = trial.centerCorrect ? "good" : "bad";
+    const peripheral = trial.peripheralCorrect ? "good" : "bad";
+    const result = trial.correct ? "good" : "bad";
+    const location = Array.isArray(trial.expectedDirections) && trial.expectedDirections.length
+      ? trial.expectedDirections.map((direction) => direction.label || direction.name || "?").join("+")
+      : "—";
+
+    return `
+      <div class="session-trial-row">
+        <span class="trial-index">#${Number(trial.index || 0)}</span>
+        <span>${Math.round(trial.flash || 0)}ms</span>
+        <span><i class="mini-result ${center}"></i>Center</span>
+        <span><i class="mini-result ${peripheral}"></i>Peripheral ${escapeHtml(location)}</span>
+        <strong class="trial-result ${result}">${trial.correct ? "Correct" : "Miss"}</strong>
+      </div>
+    `;
+  }
+
+  function formatFlashChange(before, after) {
+    const start = Math.round(Number(before) || 0);
+    const end = Math.round(Number(after) || start);
+    return start === end ? `${end}ms` : `${start}ms → ${end}ms`;
+  }
+
+  function formatSessionGoal(session) {
+    const goal = session.goal || {};
+    if (goal.type === "time") return `Timer · ${formatDuration(goal.targetMs || 0)}`;
+    if (goal.type === "correctTrials") return `Correct trials · ${goal.target || session.total || 0}`;
+    if (goal.type === "allTrials") return `All trials · ${goal.target || session.total || 0}`;
+    return "Completed session";
+  }
+
+  function formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    if (hours > 0) return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    return `${minutes}:${String(seconds).padStart(2, "0")}`;
   }
 
   function sizeChartCanvas(canvas) {
     const wrap = canvas.closest(".chart-wrap");
-    const availableWidth = wrap ? wrap.clientWidth : 1120;
-    const availableHeight = wrap ? wrap.clientHeight : 360;
-    const width = clamp(Math.round(availableWidth - 20), 720, 1180);
-    const height = clamp(Math.round(availableHeight - 12), 300, 520);
+    const rect = wrap ? wrap.getBoundingClientRect() : null;
+    const availableWidth = rect && rect.width ? rect.width : (wrap ? wrap.clientWidth : 1120);
+    const availableHeight = rect && rect.height ? rect.height : (wrap ? wrap.clientHeight : 430);
+    const cssWidth = clamp(Math.round(availableWidth - 14), 720, 1380);
+    const cssHeight = clamp(Math.round(availableHeight - 18), 320, 540);
+    const pixelRatio = clamp(window.devicePixelRatio || 1, 1, 2);
+    const pixelWidth = Math.round(cssWidth * pixelRatio);
+    const pixelHeight = Math.round(cssHeight * pixelRatio);
 
-    if (canvas.width !== width) canvas.width = width;
-    if (canvas.height !== height) canvas.height = height;
+    if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
+    if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
+
+    canvas.style.width = `${cssWidth}px`;
+    canvas.style.height = `${cssHeight}px`;
+    canvas.dataset.chartWidth = String(cssWidth);
+    canvas.dataset.chartHeight = String(cssHeight);
+    canvas.dataset.chartPixelRatio = String(pixelRatio);
   }
 
   function percentToChartY(value, padding, chartHeight) {
@@ -237,14 +438,17 @@ window.UFOVProgress = (() => {
 
     sizeChartCanvas(canvas);
     const ctx = canvas.getContext("2d");
-    const width = canvas.width;
-    const height = canvas.height;
+    const pixelRatio = Number(canvas.dataset.chartPixelRatio) || 1;
+    const width = Number(canvas.dataset.chartWidth) || Math.round(canvas.width / pixelRatio);
+    const height = Number(canvas.dataset.chartHeight) || Math.round(canvas.height / pixelRatio);
     const chartState = getChartData(history);
     const data = chartState.rows;
     chartHoverPoints = [];
 
-    ctx.clearRect(0, 0, width, height);
-    ctx.imageSmoothingEnabled = true;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    ctx.imageSmoothingEnabled = false;
 
     ctx.fillStyle = "#050505";
     ctx.fillRect(0, 0, width, height);
@@ -257,20 +461,23 @@ window.UFOVProgress = (() => {
       passiveDates.innerHTML = data.length ? renderChartDateRange(data) : "";
     }
 
-    if (data.length < 2) {
-      drawCenteredText(ctx, "Complete at least 2 matching progress checks to show a chart.", width, height);
+    if (!data.length) {
+      drawCenteredText(ctx, "Complete a matching progress check to show a chart.", width, height);
       return;
     }
 
     const padding = {
       left: 72,
-      right: 44,
-      top: 50,
-      bottom: 34
+      right: 48,
+      top: 46,
+      bottom: 76
     };
 
     const chartWidth = width - padding.left - padding.right;
     const chartHeight = height - padding.top - padding.bottom;
+    const chartX = (index) => data.length === 1
+      ? padding.left + chartWidth / 2
+      : padding.left + (index / (data.length - 1)) * chartWidth;
 
     drawGrid(ctx, padding, chartWidth, chartHeight);
     drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight);
@@ -278,7 +485,7 @@ window.UFOVProgress = (() => {
     drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.regressAccuracy, "#fb7185", "regress");
 
     const difficultyPoints = data.map((row, index) => {
-      const x = padding.left + (index / (data.length - 1)) * chartWidth;
+      const x = chartX(index);
       const value = difficultyScore(row, chartState.current);
       const y = percentToChartY(value, padding, chartHeight);
 
@@ -293,22 +500,22 @@ window.UFOVProgress = (() => {
     });
 
     const accuracyPoints = data.map((row, index) => {
-      const x = padding.left + (index / (data.length - 1)) * chartWidth;
+      const x = chartX(index);
       const value = Number(row.accuracy) || 0;
       const y = percentToChartY(value, padding, chartHeight);
 
       return { x, y, row, index, metric: "Accuracy", value };
     });
 
-    drawLine(ctx, difficultyPoints, "#8b5cf6", 4);
-    drawLine(ctx, accuracyPoints, "#22c55e", 4);
-    drawDots(ctx, difficultyPoints, "#8b5cf6");
-    drawDots(ctx, accuracyPoints, "#22c55e");
+    drawLine(ctx, difficultyPoints, "#8b5cf6", 3);
+    drawLine(ctx, accuracyPoints, "#22c55e", 3);
+    drawDots(ctx, difficultyPoints, "#8b5cf6", 4.5);
+    drawDots(ctx, accuracyPoints, "#22c55e", 4.5);
     chartHoverPoints = [...difficultyPoints, ...accuracyPoints];
 
     ctx.fillStyle = "#d6d3d1";
-    ctx.font = "800 17px Inter, system-ui, sans-serif";
-    ctx.fillText("Higher is better: faster flash difficulty and accuracy", padding.left, 30);
+    ctx.font = "800 16px Inter, system-ui, sans-serif";
+    ctx.fillText("Higher is better: faster flash difficulty and accuracy", Math.round(padding.left), 30);
   }
 
   function handleChartHover(event) {
@@ -316,8 +523,8 @@ window.UFOVProgress = (() => {
 
     const canvas = event.currentTarget;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const scaleX = (Number(canvas.dataset.chartWidth) || rect.width) / rect.width;
+    const scaleY = (Number(canvas.dataset.chartHeight) || rect.height) / rect.height;
     const x = (event.clientX - rect.left) * scaleX;
     const y = (event.clientY - rect.top) * scaleY;
 
@@ -360,28 +567,54 @@ window.UFOVProgress = (() => {
 
   function renderChartTooltip(point) {
     const row = point.row;
-    const flashText = Math.round(row.flashBefore) === Math.round(row.flashAfter)
-      ? `${Math.round(row.flashAfter)}ms`
-      : `${Math.round(row.flashBefore)}ms → ${Math.round(row.flashAfter)}ms`;
+    const flashText = formatChartFlashText(row);
+    const bucketLine = row.isChartBucket
+      ? `<span>Point: ${row.bucketCount} check${row.bucketCount === 1 ? "" : "s"} · ${escapeHtml(formatChartBucketRange(row))}</span>`
+      : `<span>${escapeHtml(formatAbsoluteDate(row.date))}</span>`;
+
+    const trialsLine = `Trials: ${row.correctCount}/${row.trials}`;
+    const accuracyLine = `Accuracy: ${Math.round(row.accuracy)}% · Center: ${Math.round(row.centerAccuracy)}% · Peripheral: ${escapeHtml(formatPeripheral(row))}`;
+    const flashLine = `Flash: ${escapeHtml(flashText)}`;
+    const settingsLine = `Settings: ${escapeHtml(formatSettings(row))}`;
+    const changeLine = `Change: ${escapeHtml(getActionLabel(row.action))}`;
 
     return `
       <strong>${escapeHtml(point.metric)} · ${Math.round(point.value)}%</strong>
-      <span>${escapeHtml(formatAbsoluteDate(row.date))}</span>
+      ${bucketLine}
       <span>${escapeHtml(row.modeName || `Mode ${row.mode}`)}</span>
-      <span>Flash: ${escapeHtml(flashText)} · Trials: ${row.correctCount}/${row.trials}</span>
-      <span>Accuracy: ${Math.round(row.accuracy)}% · Center: ${Math.round(row.centerAccuracy)}% · Peripheral: ${escapeHtml(formatPeripheral(row))}</span>
-      <span>${escapeHtml(formatSettings(row))}</span>
-      <span>Change: ${escapeHtml(getActionLabel(row.action))}</span>
+      <span>${trialsLine}</span>
+      <span>${flashLine}</span>
+      <span>${accuracyLine}</span>
+      <span>${settingsLine}</span>
+      <span>${changeLine}</span>
     `;
+  }
+
+  function formatChartFlashText(row) {
+    if (row.isChartBucket) {
+      const average = Math.round(Number(row.flashAfter) || 0);
+      const min = Math.round(Number(row.flashMin) || average);
+      const max = Math.round(Number(row.flashMax) || average);
+      return min === max ? `${average}ms avg` : `${average}ms avg · ${min}-${max}ms`;
+    }
+
+    return formatFlashChange(row.flashBefore, row.flashAfter);
+  }
+
+  function formatChartBucketRange(row) {
+    const start = row.bucketStart || row.date;
+    const end = row.bucketEnd || row.date;
+    return `${formatAbsoluteDate(start)} - ${formatAbsoluteDate(end)}`;
   }
 
   function renderChartDateRange(data) {
     const first = data[0];
     const latest = data[data.length - 1];
+    const sourceCount = data.reduce((sum, row) => sum + Number(row.bucketCount || 1), 0);
 
     return `
-      <span>Showing <strong>${data.length}</strong> checks from <strong>${escapeHtml(formatChartDate(first.date))}</strong> to <strong>${escapeHtml(formatChartDate(latest.date))}</strong>.</span>
-      <span>Hover any dot for exact date, settings, flash, and scores.</span>
+      <span>Showing <strong>${data.length}</strong> point${data.length === 1 ? "" : "s"} from <strong>${escapeHtml(formatChartDate(first.date))}</strong> to <strong>${escapeHtml(formatChartDate(latest.date))}</strong>.</span>
+      <span>Grouped from <strong>${sourceCount}</strong> check${sourceCount === 1 ? "" : "s"}. Hover a dot for details.</span>
     `;
   }
 
@@ -406,9 +639,9 @@ window.UFOVProgress = (() => {
     const current = readCurrentSettings();
     const exact = history.filter((row) => recordMatchesCurrent(row, current));
 
-    if (exact.length >= 2) {
+    if (exact.length >= 1) {
       return {
-        rows: exact.slice(-80),
+        rows: aggregateChartRows(exact, current).slice(-80),
         scope: "current settings",
         current
       };
@@ -417,10 +650,93 @@ window.UFOVProgress = (() => {
     const sameMode = history.filter((row) => Number(row.mode) === current.mode);
 
     return {
-      rows: sameMode.slice(-80),
-      scope: exact.length === 1 ? "same mode, waiting for one more exact check" : "same mode",
+      rows: aggregateChartRows(sameMode, current).slice(-80),
+      scope: "same mode",
       current
     };
+  }
+
+  function aggregateChartRows(rows, current) {
+    const sorted = rows
+      .filter((row) => Number.isFinite(Number(row.date)))
+      .sort((a, b) => Number(a.date || 0) - Number(b.date || 0));
+
+    const buckets = new Map();
+
+    sorted.forEach((row) => {
+      const date = Number(row.date || 0);
+      const bucketId = getLocalChartBucketId(date);
+      if (!buckets.has(bucketId)) buckets.set(bucketId, []);
+      buckets.get(bucketId).push(row);
+    });
+
+    return Array.from(buckets.entries()).map(([bucketId, bucketRows]) => {
+      const first = bucketRows[0];
+      const latest = bucketRows[bucketRows.length - 1];
+      const totalTrials = sumNumbers(bucketRows, "trials");
+      const correctCount = sumNumbers(bucketRows, "correctCount");
+      const wrongCount = sumNumbers(bucketRows, "wrongCount");
+      const flashValues = bucketRows.map((row) => Number(row.flashAfter)).filter(Number.isFinite);
+      const averageFlash = averageNumbers(flashValues, Number(latest.flashAfter) || Number(first.flashAfter) || 0);
+      const weighted = (key) => weightedAverage(bucketRows, key, "trials");
+
+      return {
+        ...latest,
+        id: `chart-bucket-${bucketId}`,
+        isChartBucket: true,
+        bucketCount: bucketRows.length,
+        bucketStart: Number(first.date || 0),
+        bucketEnd: Number(latest.date || 0),
+        date: Number(latest.date || 0),
+        mode: latest.mode,
+        modeName: latest.modeName || first.modeName,
+        settings: latest.settings || first.settings || current,
+        trials: totalTrials || bucketRows.length,
+        correctCount,
+        wrongCount: wrongCount || Math.max(0, (totalTrials || bucketRows.length) - correctCount),
+        accuracy: totalTrials > 0 ? (correctCount / totalTrials) * 100 : weighted("accuracy"),
+        centerAccuracy: weighted("centerAccuracy"),
+        peripheralAccuracy: weighted("peripheralAccuracy"),
+        flashBefore: Number(first.flashBefore) || Number(first.flashAfter) || averageFlash,
+        flashAfter: averageFlash,
+        flashMin: flashValues.length ? Math.min(...flashValues) : averageFlash,
+        flashMax: flashValues.length ? Math.max(...flashValues) : averageFlash,
+        action: latest.action
+      };
+    });
+  }
+
+  function getLocalChartBucketId(timestamp) {
+    const offsetMs = new Date(timestamp).getTimezoneOffset() * 60 * 1000;
+    return Math.floor((timestamp - offsetMs) / CHART_BUCKET_MS);
+  }
+
+  function sumNumbers(rows, key) {
+    return rows.reduce((sum, row) => {
+      const value = Number(row[key]);
+      return sum + (Number.isFinite(value) ? value : 0);
+    }, 0);
+  }
+
+  function averageNumbers(values, fallback = 0) {
+    const safe = values.filter(Number.isFinite);
+    if (!safe.length) return fallback;
+    return safe.reduce((sum, value) => sum + value, 0) / safe.length;
+  }
+
+  function weightedAverage(rows, valueKey, weightKey) {
+    let weightedSum = 0;
+    let totalWeight = 0;
+
+    rows.forEach((row) => {
+      const value = Number(row[valueKey]);
+      const weight = Math.max(1, Number(row[weightKey]) || 1);
+      if (!Number.isFinite(value)) return;
+      weightedSum += value * weight;
+      totalWeight += weight;
+    });
+
+    return totalWeight > 0 ? weightedSum / totalWeight : 0;
   }
 
   function readCurrentSettings() {
@@ -500,10 +816,12 @@ window.UFOVProgress = (() => {
       difficultyDelta < -3 ? "Easier" :
       "Stable";
 
+    const sourceCount = data.reduce((sum, row) => sum + Number(row.bucketCount || 1), 0);
+
     return `
-      <div><strong>Checks</strong><span>${data.length}</span></div>
+      <div><strong>Points</strong><span>${data.length} <small>from ${sourceCount}</small></span></div>
       <div><strong>Scope</strong><span>${escapeHtml(scope)}</span></div>
-      <div><strong>Latest</strong><span>${Math.round(latest.flashAfter)}ms · ${Math.round(latest.accuracy)}%</span></div>
+      <div><strong>Latest avg</strong><span>${Math.round(latest.flashAfter)}ms · ${Math.round(latest.accuracy)}%</span></div>
       <div><strong>Trend</strong><span>${trend}</span></div>
     `;
   }
@@ -529,25 +847,34 @@ window.UFOVProgress = (() => {
     return parts.join(" · ");
   }
 
+  function crispStrokePosition(value) {
+    return Math.round(value) + 0.5;
+  }
+
   function drawGrid(ctx, padding, chartWidth, chartHeight) {
-    ctx.strokeStyle = "rgba(255,255,255,0.08)";
     ctx.lineWidth = 1;
 
     [100, 75, 50, 25, 0].forEach((value) => {
-      const y = percentToChartY(value, padding, chartHeight);
+      const y = crispStrokePosition(percentToChartY(value, padding, chartHeight));
 
+      ctx.strokeStyle = value === 0 ? "rgba(255,255,255,0.28)" : "rgba(255,255,255,0.08)";
       ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(padding.left + chartWidth, y);
+      ctx.moveTo(crispStrokePosition(padding.left), y);
+      ctx.lineTo(crispStrokePosition(padding.left + chartWidth), y);
       ctx.stroke();
     });
 
-    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    const left = crispStrokePosition(padding.left);
+    const right = crispStrokePosition(padding.left + chartWidth);
+    const top = crispStrokePosition(padding.top);
+    const bottom = crispStrokePosition(padding.top + chartHeight);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.22)";
     ctx.beginPath();
-    ctx.moveTo(padding.left, padding.top);
-    ctx.lineTo(padding.left, padding.top + chartHeight);
-    ctx.lineTo(padding.left + chartWidth, padding.top + chartHeight);
-    ctx.lineTo(padding.left + chartWidth, padding.top);
+    ctx.moveTo(left, top);
+    ctx.lineTo(left, bottom);
+    ctx.lineTo(right, bottom);
+    ctx.lineTo(right, top);
     ctx.stroke();
   }
 
@@ -557,8 +884,8 @@ window.UFOVProgress = (() => {
     ctx.textAlign = "right";
 
     [100, 75, 50, 25, 0].forEach((value) => {
-      const y = percentToChartY(value, padding, chartHeight);
-      ctx.fillText(`${value}%`, padding.left - 14, y + 5);
+      const y = Math.round(percentToChartY(value, padding, chartHeight));
+      ctx.fillText(`${value}%`, Math.round(padding.left - 14), y + 5);
     });
 
     ctx.textAlign = "left";
@@ -568,29 +895,30 @@ window.UFOVProgress = (() => {
   }
 
   function drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, value, color, label) {
-    const y = percentToChartY(value, padding, chartHeight);
+    const y = crispStrokePosition(percentToChartY(value, padding, chartHeight));
 
     ctx.save();
     ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.72;
     ctx.lineWidth = 2;
     ctx.setLineDash([8, 8]);
 
     ctx.beginPath();
-    ctx.moveTo(padding.left, y);
-    ctx.lineTo(padding.left + chartWidth, y);
+    ctx.moveTo(crispStrokePosition(padding.left), y);
+    ctx.lineTo(crispStrokePosition(padding.left + chartWidth), y);
     ctx.stroke();
 
     ctx.setLineDash([]);
     ctx.fillStyle = color;
     ctx.font = "800 12px Inter, system-ui, sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText(`${label} ${Math.round(value)}%`, padding.left + chartWidth - 8, y - 8);
+    ctx.fillText(`${label} ${Math.round(value)}%`, Math.round(padding.left + chartWidth - 8), Math.round(y - 8));
     ctx.textAlign = "left";
     ctx.restore();
   }
 
   function drawLine(ctx, points, color, width) {
-    if (!points.length) return;
+    if (points.length < 2) return;
 
     ctx.save();
     ctx.strokeStyle = color;
@@ -613,12 +941,12 @@ window.UFOVProgress = (() => {
     ctx.restore();
   }
 
-  function drawDots(ctx, points, color) {
+  function drawDots(ctx, points, color, radius = 4.5) {
     ctx.fillStyle = color;
 
     points.forEach((point) => {
       ctx.beginPath();
-      ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
       ctx.fill();
     });
   }
@@ -650,8 +978,8 @@ window.UFOVProgress = (() => {
   }
 
   function formatPeripheral(row) {
-    if (row.mode === 1) return "—";
-    return `${Math.round(row.peripheralAccuracy)}%`;
+    if (Number(row.mode) === 1) return "—";
+    return `${Math.round(Number(row.peripheralAccuracy) || 0)}%`;
   }
 
   function formatRelativeDate(timestamp) {
@@ -688,6 +1016,7 @@ window.UFOVProgress = (() => {
 
   return {
     recordCheck,
+    recordSession,
     open,
     close
   };

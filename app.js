@@ -66,7 +66,11 @@ const resetSettingsButton = document.getElementById("resetSettingsButton");
 const timerButton = document.getElementById("timerButton");
 const timerReadout = document.getElementById("timerReadout");
 const timerPanel = document.getElementById("timerPanel");
+const timerGoalModeSelect = document.getElementById("timerGoalModeSelect");
 const timerMinutesInput = document.getElementById("timerMinutesInput");
+const timerTrialsInput = document.getElementById("timerTrialsInput");
+const timerMinutesField = document.getElementById("timerMinutesField");
+const timerTrialsField = document.getElementById("timerTrialsField");
 const timerSetButton = document.getElementById("timerSetButton");
 const timerClearButton = document.getElementById("timerClearButton");
 const timerCloseButton = document.getElementById("timerCloseButton");
@@ -88,6 +92,9 @@ const FLASH_DURATION_KEY = "ufov_current_flash_ms";
 const SETTINGS_KEY = "ufov_settings";
 const TIMER_MINUTES_KEY = "ufov_timer_minutes";
 const TIMER_STATE_KEY = "ufov_timer_state";
+const TIMER_GOAL_MODE_KEY = "ufov_timer_goal_mode";
+const TIMER_TRIAL_TARGET_KEY = "ufov_timer_trial_target";
+const TRIAL_GOAL_STATE_KEY = "ufov_trial_goal_state";
 const MOBILE_WARNING_SESSION_KEY = "ufov_mobile_warning_seen";
 const DEFAULT_CENTER_CHOICE_HOTKEYS = ["A", "D"];
 const DEFAULT_COMBINED_CHOICE_HOTKEYS = ["7", "8", "9", "4", "5", "6", "1", "2", "3", "0"];
@@ -106,6 +113,8 @@ let occupiedStimulusPoints = [];
 let responseLock = true;
 let sessionToken = 0;
 let countdown = createCountdownState();
+let trialGoal = createTrialGoalState();
+let activeSession = null;
 let countdownTimer = null;
 let hoverDirection = null;
 let activeHotkeyCapture = null;
@@ -140,6 +149,15 @@ function createCountdownState() {
     totalMs: 0,
     remainingMs: 0,
     lastTick: null
+  };
+}
+
+function createTrialGoalState() {
+  return {
+    enabled: false,
+    mode: "allTrials",
+    target: 0,
+    completed: 0
   };
 }
 
@@ -336,11 +354,51 @@ function loadSavedFlashDuration(settings) {
   }
 }
 
+ function loadSavedTrialGoal() {
+   try {
+     const raw = localStorage.getItem(TRIAL_GOAL_STATE_KEY);
+     if (!raw) return null;
+
+     const saved = JSON.parse(raw);
+     const mode = ["allTrials", "correctTrials"].includes(saved.mode) ? saved.mode : "allTrials";
+     const target = Math.round(clamp(Number(saved.target), 1, 999));
+     const completed = Math.round(clamp(Number(saved.completed), 0, target));
+
+     if (!Number.isFinite(target) || target <= 0) return null;
+
+     return {
+       enabled: saved.enabled !== false && completed < target,
+       mode,
+       target,
+       completed
+     };
+   } catch (_) {
+     return null;
+   }
+ }
+
 function saveFlashDuration() {
   try {
     localStorage.setItem(FLASH_DURATION_KEY, String(Math.round(state.duration)));
   } catch (_) {}
 }
+
+ function saveTrialGoalState() {
+   try {
+     if (!trialGoal.target || trialGoal.target <= 0) {
+       localStorage.removeItem(TRIAL_GOAL_STATE_KEY);
+       return;
+     }
+
+     localStorage.setItem(TRIAL_GOAL_STATE_KEY, JSON.stringify({
+       enabled: trialGoal.enabled,
+       mode: trialGoal.mode,
+       target: Math.round(trialGoal.target),
+       completed: Math.round(trialGoal.completed),
+       savedAt: Date.now()
+     }));
+   } catch (_) {}
+ }
 
 function wait(ms) {
   return new Promise((resolve) => {
@@ -490,7 +548,9 @@ function startSession() {
   state.skippable = false;
   const token = sessionToken;
   state = createInitialState();
+  activeSession = null;
   state.running = true;
+  ensureActiveSession();
   countdown.lastTick = null;
   updateTimerUi();
   startOverlay.classList.add("hidden");
@@ -506,7 +566,7 @@ function resetSession() {
   sessionToken += 1;
   setTrialCursorHidden(false);
   state = createInitialState();
-  clearCountdown(false);
+  clearSessionGoal(false);
   startOverlay.classList.remove("hidden");
   pauseButton.classList.add("hidden");
   responseOverlay.classList.remove("visible", "feedback-mode", "peripheral-chooser");
@@ -554,6 +614,34 @@ function saveTimerMinutes(minutes) {
   } catch (_) {}
 }
 
+function getSavedTimerGoalMode() {
+  try {
+    const saved = localStorage.getItem(TIMER_GOAL_MODE_KEY);
+    if (["time", "allTrials", "correctTrials"].includes(saved)) return saved;
+  } catch (_) {}
+  return "time";
+}
+
+function saveTimerGoalMode(mode) {
+  try {
+    localStorage.setItem(TIMER_GOAL_MODE_KEY, mode);
+  } catch (_) {}
+}
+
+function getSavedTrialTarget() {
+  try {
+    const saved = Number(localStorage.getItem(TIMER_TRIAL_TARGET_KEY));
+    if (Number.isFinite(saved) && saved >= 1 && saved <= 999) return saved;
+  } catch (_) {}
+  return 50;
+}
+
+function saveTrialTarget(target) {
+  try {
+    localStorage.setItem(TIMER_TRIAL_TARGET_KEY, String(target));
+  } catch (_) {}
+}
+
 function loadSavedCountdown() {
   try {
     const raw = localStorage.getItem(TIMER_STATE_KEY);
@@ -594,48 +682,117 @@ function saveCountdownState() {
 }
 
 function initializeTimerControls() {
+  if (timerGoalModeSelect) timerGoalModeSelect.value = getSavedTimerGoalMode();
   if (timerMinutesInput) timerMinutesInput.value = String(getSavedTimerMinutes());
+  if (timerTrialsInput) timerTrialsInput.value = String(getSavedTrialTarget());
+
   const savedCountdown = loadSavedCountdown();
-  if (savedCountdown) {
+  const savedTrialGoal = loadSavedTrialGoal();
+
+  if (savedTrialGoal) {
+    trialGoal = savedTrialGoal;
+    if (timerGoalModeSelect) timerGoalModeSelect.value = savedTrialGoal.mode;
+  } else if (savedCountdown) {
     countdown = savedCountdown;
+    if (timerGoalModeSelect) timerGoalModeSelect.value = "time";
     ensureCountdownTimer();
   }
-  if (timerButton) timerButton.addEventListener("click", openTimerPanel);
+
+  if (timerButton) timerButton.addEventListener("click", toggleTimerPanel);
+  if (timerGoalModeSelect) timerGoalModeSelect.addEventListener("change", () => {
+    saveTimerGoalMode(timerGoalModeSelect.value);
+    updateTimerGoalFields();
+  });
   if (timerCloseButton) timerCloseButton.addEventListener("click", closeTimerPanel);
-  if (timerSetButton) timerSetButton.addEventListener("click", setCountdownFromInput);
-  if (timerClearButton) timerClearButton.addEventListener("click", () => clearCountdown(true));
-  if (timerPanel) {
-    timerPanel.addEventListener("click", (event) => {
-      if (event.target === timerPanel) closeTimerPanel();
-    });
-  }
+  if (timerSetButton) timerSetButton.addEventListener("click", setSessionGoalFromInput);
+  if (timerClearButton) timerClearButton.addEventListener("click", () => clearSessionGoal(true));
+  document.addEventListener("pointerdown", (event) => {
+    if (!timerPanel || timerPanel.classList.contains("hidden")) return;
+    if (timerPanel.contains(event.target)) return;
+    if (timerButton && timerButton.contains(event.target)) return;
+    closeTimerPanel();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeTimerPanel();
+  });
+
+  updateTimerGoalFields();
   updateTimerUi();
+}
+
+function toggleTimerPanel() {
+  if (!timerPanel) return;
+  if (timerPanel.classList.contains("hidden")) openTimerPanel();
+  else closeTimerPanel();
 }
 
 function openTimerPanel() {
   if (!timerPanel) return;
   timerPanel.classList.remove("hidden");
+  updateTimerGoalFields();
   updateTimerUi();
-  if (timerMinutesInput) timerMinutesInput.select();
+  window.requestAnimationFrame(() => timerPanel.classList.add("open"));
+  if (timerGoalModeSelect && timerGoalModeSelect.value === "time" && timerMinutesInput) timerMinutesInput.select();
+  if (timerGoalModeSelect && timerGoalModeSelect.value !== "time" && timerTrialsInput) timerTrialsInput.select();
 }
 
 function closeTimerPanel() {
-  if (timerPanel) timerPanel.classList.add("hidden");
+  if (!timerPanel) return;
+  timerPanel.classList.remove("open");
+  window.setTimeout(() => {
+    if (!timerPanel.classList.contains("open")) timerPanel.classList.add("hidden");
+  }, 130);
 }
 
-function setCountdownFromInput() {
-  const minutes = Math.round(readNumber(timerMinutesInput, getSavedTimerMinutes(), 1, 240));
-  saveTimerMinutes(minutes);
-  countdown = {
-    enabled: true,
-    totalMs: minutes * 60 * 1000,
-    remainingMs: minutes * 60 * 1000,
-    lastTick: null
-  };
-  saveCountdownState();
-  ensureCountdownTimer();
+function updateTimerGoalFields() {
+  const mode = timerGoalModeSelect ? timerGoalModeSelect.value : "time";
+  if (timerMinutesField) timerMinutesField.classList.toggle("hidden", mode !== "time");
+  if (timerTrialsField) timerTrialsField.classList.toggle("hidden", mode === "time");
+  if (timerSetButton) timerSetButton.textContent = mode === "time" ? "Set timer" : "Set goal";
+}
+
+function setSessionGoalFromInput() {
+  const mode = timerGoalModeSelect ? timerGoalModeSelect.value : "time";
+  saveTimerGoalMode(mode);
+  activeSession = null;
+
+  if (mode === "time") {
+    const minutes = Math.round(readNumber(timerMinutesInput, getSavedTimerMinutes(), 1, 240));
+    saveTimerMinutes(minutes);
+    trialGoal = createTrialGoalState();
+    saveTrialGoalState();
+    countdown = {
+      enabled: true,
+      totalMs: minutes * 60 * 1000,
+      remainingMs: minutes * 60 * 1000,
+      lastTick: null
+    };
+    saveCountdownState();
+    ensureCountdownTimer();
+  } else {
+    const target = Math.round(readNumber(timerTrialsInput, getSavedTrialTarget(), 1, 999));
+    saveTrialTarget(target);
+    clearCountdown(false);
+    trialGoal = {
+      enabled: true,
+      mode,
+      target,
+      completed: 0
+    };
+    saveTrialGoalState();
+  }
+
   updateTimerUi();
   closeTimerPanel();
+}
+
+function clearSessionGoal(closePanel) {
+  clearCountdown(false);
+  trialGoal = createTrialGoalState();
+  activeSession = null;
+  saveTrialGoalState();
+  updateTimerUi();
+  if (closePanel) closeTimerPanel();
 }
 
 function clearCountdown(closePanel) {
@@ -699,6 +856,20 @@ function expireCountdown() {
   countdown.remainingMs = 0;
   saveCountdownState();
   stopCountdownTimer();
+  completeActiveSession("time");
+  pauseSessionAfterGoal("Timer done", "Session paused. Take a break or press Resume to continue.");
+}
+
+function completeTrialGoal() {
+  trialGoal.enabled = false;
+  trialGoal.completed = trialGoal.target;
+  saveTrialGoalState();
+  const label = trialGoal.mode === "correctTrials" ? "correct trials" : "trials";
+  completeActiveSession(trialGoal.mode);
+  pauseSessionAfterGoal("Trial goal done", `Completed ${trialGoal.target} ${label}. Take a break or press Resume to continue.`);
+}
+
+function pauseSessionAfterGoal(title, message) {
   window.clearTimeout(pendingTimer);
   sessionToken += 1;
   state.paused = true;
@@ -707,12 +878,163 @@ function expireCountdown() {
   responseOverlay.classList.remove("combined-mode", "peripheral-chooser");
   responseOverlay.classList.add("visible", "feedback-mode");
   promptText.className = "feedback-title correct";
-  promptText.textContent = "Timer done";
+  promptText.textContent = title;
   feedbackText.className = "success";
-  feedbackText.textContent = "Session paused. Take a break or press Resume to continue.";
+  feedbackText.textContent = message;
   pauseButton.classList.remove("hidden");
   updateTimerUi();
   updateStats();
+}
+
+function advanceTrialGoal(correct) {
+  if (!trialGoal.target || trialGoal.target <= 0) return false;
+  if (!trialGoal.enabled || trialGoal.completed >= trialGoal.target) return false;
+
+  const shouldCount = trialGoal.mode === "allTrials" || (trialGoal.mode === "correctTrials" && correct);
+  if (shouldCount) {
+    trialGoal.completed = Math.min(trialGoal.target, trialGoal.completed + 1);
+    saveTrialGoalState();
+  }
+
+  updateTimerUi();
+
+  if (trialGoal.completed >= trialGoal.target) {
+    completeTrialGoal();
+    return true;
+  }
+
+  return false;
+}
+
+function getSessionGoalSnapshot() {
+  if (countdown.totalMs > 0 || countdown.remainingMs > 0) {
+    return {
+      type: "time",
+      targetMs: Math.round(countdown.totalMs || countdown.remainingMs || 0),
+      remainingMs: Math.round(countdown.remainingMs || 0)
+    };
+  }
+
+  if (trialGoal.target > 0) {
+    return {
+      type: trialGoal.mode,
+      target: Math.round(trialGoal.target),
+      completed: Math.round(trialGoal.completed)
+    };
+  }
+
+  return null;
+}
+
+function getProgressSettingsSnapshot(settings = getSettings()) {
+  return {
+    mode: state.level,
+    responseStyle: settings.responseStyle,
+    stimulusArea: settings.stimulusArea,
+    directionCount: settings.directionCount,
+    peripheralTargets: settings.peripheralTargets,
+    distractors: settings.distractors,
+    trialsToCheck: settings.trialsToCheck,
+    targetAccuracy: Math.round(settings.targetAccuracy * 100),
+    regressAccuracy: Math.round(settings.regressAccuracy * 100),
+    minDuration: Math.round(settings.minDuration),
+    maxDuration: Math.round(settings.maxDuration)
+  };
+}
+
+function ensureActiveSession() {
+  const goal = getSessionGoalSnapshot();
+  if (!goal) return null;
+
+  if (!activeSession) {
+    const settings = getSettings();
+    activeSession = {
+      id: window.crypto && window.crypto.randomUUID
+        ? window.crypto.randomUUID()
+        : String(Date.now() + Math.random()),
+      startDate: Date.now(),
+      mode: state.level,
+      modeName: levelNames[state.level - 1],
+      goal,
+      settings: getProgressSettingsSnapshot(settings),
+      flashBefore: Math.round(state.duration),
+      flashAfter: Math.round(state.duration),
+      trials: []
+    };
+  } else {
+    activeSession.goal = goal;
+  }
+
+  return activeSession;
+}
+
+function compactDirection(direction) {
+  if (!direction) return null;
+  return {
+    index: direction.index,
+    label: direction.label,
+    name: direction.name
+  };
+}
+
+function recordSessionTrial(correct, centerCorrect, peripheralCorrect) {
+  const session = ensureActiveSession();
+  if (!session || !state.current) return;
+
+  const expectedDirections = (state.current.directions || [state.current.direction]).map(compactDirection).filter(Boolean);
+  const responseDirections = (state.response.peripherals || []).map(compactDirection).filter(Boolean);
+
+  session.trials.push({
+    index: session.trials.length + 1,
+    date: Date.now(),
+    mode: state.level,
+    flash: Math.round(state.duration),
+    correct,
+    centerCorrect,
+    peripheralCorrect,
+    expectedCenter: state.current.center,
+    responseCenter: state.response.center,
+    expectedDirections,
+    responseDirections
+  });
+}
+
+function completeActiveSession(reason) {
+  if (!activeSession || !Array.isArray(activeSession.trials) || !activeSession.trials.length) return;
+
+  const trials = activeSession.trials;
+  const total = trials.length;
+  const correctCount = trials.filter((trial) => trial.correct).length;
+  const centerCorrectCount = trials.filter((trial) => trial.centerCorrect).length;
+  const peripheralCorrectCount = trials.filter((trial) => trial.peripheralCorrect).length;
+  const endDate = Date.now();
+
+  const completed = {
+    ...activeSession,
+    reason,
+    endDate,
+    date: endDate,
+    durationMs: Math.max(0, endDate - activeSession.startDate),
+    flashAfter: Math.round(state.duration),
+    total,
+    correctCount,
+    wrongCount: total - correctCount,
+    accuracy: total ? (correctCount / total) * 100 : 0,
+    centerAccuracy: total ? (centerCorrectCount / total) * 100 : 0,
+    peripheralAccuracy: state.level === 1 ? 100 : (total ? (peripheralCorrectCount / total) * 100 : 0),
+    goal: {
+      ...(activeSession.goal || {}),
+      completed: activeSession.goal && activeSession.goal.type === "time"
+        ? Math.max(0, Math.round((activeSession.goal.targetMs || 0) - (countdown.remainingMs || 0)))
+        : Math.round(trialGoal.completed || total)
+    }
+  };
+
+  if (window.UFOVProgress && typeof window.UFOVProgress.recordSession === "function") {
+    window.UFOVProgress.recordSession(completed);
+  }
+
+  activeSession = null;
 }
 
 function formatCountdown(ms) {
@@ -724,18 +1046,40 @@ function formatCountdown(ms) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function updateTimerUi() {
-  const hasTimer = countdown.totalMs > 0 || countdown.remainingMs > 0;
-  const active = countdown.enabled && countdown.remainingMs > 0;
+function formatTrialGoal(mode, completed, target) {
+  const prefix = mode === "correctTrials" ? "✓" : "";
+  return `${prefix}${Math.round(completed)}/${Math.round(target)}`;
+}
+
+ function updateTimerUi() {
+  const hasTimeGoal = countdown.totalMs > 0 || countdown.remainingMs > 0;
+  const activeTimeGoal = countdown.enabled && countdown.remainingMs > 0;
+  const hasTrialGoal = trialGoal.target > 0;
+  const activeTrialGoal = trialGoal.enabled && trialGoal.completed < trialGoal.target;
+  const hasGoal = hasTimeGoal || hasTrialGoal;
+
   if (timerReadout) {
-    timerReadout.textContent = hasTimer ? formatCountdown(countdown.remainingMs) : "";
-    timerReadout.classList.toggle("hidden", !hasTimer);
-    timerReadout.classList.toggle("paused", active && (!state.running || state.paused));
+    if (hasTrialGoal) timerReadout.textContent = formatTrialGoal(trialGoal.mode, trialGoal.completed, trialGoal.target);
+    else timerReadout.textContent = hasTimeGoal ? formatCountdown(countdown.remainingMs) : "";
+    timerReadout.classList.toggle("hidden", !hasGoal);
+    timerReadout.classList.toggle("paused", (activeTimeGoal || activeTrialGoal) && (!state.running || state.paused));
   }
-  if (timerButton) timerButton.classList.toggle("active", hasTimer);
+
+  if (timerButton) timerButton.classList.toggle("active", hasGoal);
+
   if (timerStatusText) {
-    if (!hasTimer) timerStatusText.textContent = "No timer set.";
-    else if (!active) timerStatusText.textContent = "Timer finished.";
+    if (hasTrialGoal) {
+      const label = trialGoal.mode === "correctTrials" ? "correct trials" : "trials";
+      const progress = formatTrialGoal(trialGoal.mode, trialGoal.completed, trialGoal.target);
+      if (!activeTrialGoal) timerStatusText.textContent = `Goal finished: ${progress} ${label}.`;
+      else if (!state.running) timerStatusText.textContent = `Ready: ${progress} ${label}. Starts when you press Start.`;
+      else if (state.paused) timerStatusText.textContent = `Paused with app: ${progress} ${label}.`;
+      else timerStatusText.textContent = `Running: ${progress} ${label}.`;
+      return;
+    }
+
+    if (!hasTimeGoal) timerStatusText.textContent = "No goal set.";
+    else if (!activeTimeGoal) timerStatusText.textContent = "Timer finished.";
     else if (!state.running) timerStatusText.textContent = `Ready: ${formatCountdown(countdown.remainingMs)}. Starts when you press Start.`;
     else if (state.paused) timerStatusText.textContent = `Paused with app: ${formatCountdown(countdown.remainingMs)} left.`;
     else timerStatusText.textContent = `Running: ${formatCountdown(countdown.remainingMs)} left.`;
@@ -1409,13 +1753,16 @@ function finishTrial() {
   state.recent.push(correct);
   state.levelRecent.push(correct);
   state.progressBlock.push({ correct, centerCorrect, peripheralCorrect });
+  recordSessionTrial(correct, centerCorrect, peripheralCorrect);
   if (state.recent.length > 20) state.recent.shift();
   while (state.levelRecent.length > getSettings().trialsToCheck) state.levelRecent.shift();
   showFeedback(correct, centerCorrect, peripheralCorrect);
   choiceRow.innerHTML = "";
   const progressResult = applyProgressionIfNeeded();
   if (progressResult && window.UFOVProgress) window.UFOVProgress.recordCheck(progressResult);
+  const goalFinished = advanceTrialGoal(correct);
   updateStats();
+  if (goalFinished) return;
   const feedbackDelay = correct ? getSettings().correctDelayMs : getSettings().missDelayMs;
   scheduleTrial(feedbackDelay, sessionToken);
 }
