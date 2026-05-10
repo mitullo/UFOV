@@ -238,6 +238,14 @@
           </label>
 
           <label>
+            Symbol mode
+            <select id="symbolModeSelect">
+              <option value="single" selected>Single target/distractor</option>
+              <option value="interferenceControl">Interference control (p/q vs d/b)</option>
+            </select>
+          </label>
+
+          <label>
             Target symbol
             <input type="text" id="targetSymbolInput" value="✕" maxlength="4" />
           </label>
@@ -271,6 +279,8 @@
             <input type="hidden" id="splitKeyboardEmojiHotkeysInput" value="ArrowLeft,ArrowRight" />
             <input type="hidden" id="splitKeyboardClockwiseHotkeyInput" value="R" />
             <input type="hidden" id="splitKeyboardCounterClockwiseHotkeyInput" value="F" />
+            <input type="hidden" id="holdWheelCancelHotkeyInput" value="X" />
+            <input type="hidden" id="splitKeyboardDirectionHotkeysInput" value="E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C" />
             <input type="hidden" id="directionHotkeysInput" value="E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C" />
           </div>
 

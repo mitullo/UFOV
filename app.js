@@ -46,9 +46,11 @@ const maxDurationInput = document.getElementById("maxDurationInput");
 const fixationInput = document.getElementById("fixationInput");
 const maskInput = document.getElementById("maskInput");
 const symbolMaskInput = document.getElementById("symbolMaskInput");
+const symbolModeSelect = document.getElementById("symbolModeSelect");
 const maskDensityInput = document.getElementById("maskDensityInput");
 const correctDelayInput = document.getElementById("correctDelayInput");
 const missDelayInput = document.getElementById("missDelayInput");
+const randomizeDirectionHotkeysInput = document.getElementById("randomizeDirectionHotkeysInput");
 const targetSymbolInput = document.getElementById("targetSymbolInput");
 const distractorSymbolInput = document.getElementById("distractorSymbolInput");
 const blurLettersInput = document.getElementById("blurLettersInput");
@@ -58,12 +60,16 @@ const centerHotkeysInput = document.getElementById("centerHotkeysInput");
 const splitKeyboardEmojiHotkeysInput = document.getElementById("splitKeyboardEmojiHotkeysInput");
 const splitKeyboardClockwiseHotkeyInput = document.getElementById("splitKeyboardClockwiseHotkeyInput");
 const splitKeyboardCounterClockwiseHotkeyInput = document.getElementById("splitKeyboardCounterClockwiseHotkeyInput");
+const holdWheelCancelHotkeyInput = document.getElementById("holdWheelCancelHotkeyInput");
+const splitKeyboardDirectionHotkeysInput = document.getElementById("splitKeyboardDirectionHotkeysInput");
 const directionHotkeysInput = document.getElementById("directionHotkeysInput");
 const pauseHotkeyInput = document.getElementById("pauseHotkeyInput");
 const skipHotkeyInput = document.getElementById("skipHotkeyInput");
 const calmFieldInput = document.getElementById("calmFieldInput");
-const distractorInput = document.getElementById("distractorInput");
+const calmFieldStrengthInput = document.getElementById("calmFieldStrengthInput");
+const calmFieldEdgeFadeInput = document.getElementById("calmFieldEdgeFadeInput");
 const peripheralTargetInput = document.getElementById("peripheralTargetInput");
+const distractorInput = document.getElementById("distractorInput");
 const resetSettingsButton = document.getElementById("resetSettingsButton");
 const timerButton = document.getElementById("timerButton");
 const timerReadout = document.getElementById("timerReadout");
@@ -102,10 +108,15 @@ const DEFAULT_CENTER_CHOICE_HOTKEYS = ["A", "D"];
 const DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS = ["ArrowLeft", "ArrowRight"];
 const DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY = "R";
 const DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY = "F";
+const DEFAULT_HOLD_WHEEL_CANCEL_HOTKEY = "X";
+const DEFAULT_SPLIT_KEYBOARD_DIRECTION_HOTKEYS = "E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C";
 const DEFAULT_DIRECTION_HOTKEYS = "E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C";
 const DEFAULT_PAUSE_HOTKEY = "Space";
 const DEFAULT_SKIP_HOTKEY = "Backspace";
 const DIRECTION_HOTKEY_LABELS = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
+const DEFAULT_SYMBOL_MODE = "single";
+const DEFAULT_INTERFERENCE_TARGET_SYMBOLS = ["p", "q"];
+const DEFAULT_INTERFERENCE_DISTRACTOR_SYMBOLS = ["d", "b"];
 
 let state = createInitialState();
 let pendingTimer = null;
@@ -199,6 +210,9 @@ function getSettings() {
   const maximum = Math.max(readNumber(maxDurationInput, 500, 50, 1500), minimum);
   const directionCount = readNumber(directionCountInput, 8, 4, 16);
   const targetLimit = Math.min(8, directionCount);
+  const symbolMode = symbolModeSelect ? symbolModeSelect.value : DEFAULT_SYMBOL_MODE;
+  const targetSymbols = getTargetSymbolsForMode(symbolMode);
+  const distractorSymbols = getDistractorSymbolsForMode(symbolMode);
   return {
     level: readNumber(levelSelect, 3, 1, 3),
     responseStyle: responseStyleSelect ? responseStyleSelect.value : "twoStep",
@@ -220,8 +234,11 @@ function getSettings() {
     peripheralRange: readNumber(rangeSlider, 78, 36, 98),
     peripheralTargets: readNumber(peripheralTargetInput, 1, 1, targetLimit),
     distractors: readNumber(distractorInput, 18, 0, 47),
-    targetSymbol: readSymbol(targetSymbolInput, "✕"),
-    distractorSymbol: readSymbol(distractorSymbolInput, "Y"),
+    symbolMode,
+    targetSymbol: targetSymbols[0],
+    distractorSymbol: distractorSymbols[0],
+    targetSymbols,
+    distractorSymbols,
     blurLetters: blurLettersInput ? blurLettersInput.checked : false,
     letterBlur: readNumber(letterBlurInput, 2.5, 0, 12),
     hotkeys: hotkeysInput ? hotkeysInput.checked : true,
@@ -229,9 +246,14 @@ function getSettings() {
     splitKeyboardEmojiHotkeys: parseHotkeyList(splitKeyboardEmojiHotkeysInput, DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS),
     splitKeyboardClockwiseHotkey: readHotkey(splitKeyboardClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY),
     splitKeyboardCounterClockwiseHotkey: readHotkey(splitKeyboardCounterClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY),
-    directionHotkeyMap: parseDirectionHotkeyMap(directionHotkeysInput ? directionHotkeysInput.value : DEFAULT_DIRECTION_HOTKEYS),
+    holdWheelCancelHotkey: readHotkey(holdWheelCancelHotkeyInput, DEFAULT_HOLD_WHEEL_CANCEL_HOTKEY),
+    splitKeyboardDirectionHotkeyMap: parseDirectionHotkeyMap(splitKeyboardDirectionHotkeysInput ? splitKeyboardDirectionHotkeysInput.value : DEFAULT_SPLIT_KEYBOARD_DIRECTION_HOTKEYS, DEFAULT_SPLIT_KEYBOARD_DIRECTION_HOTKEYS),
+    directionHotkeyMap: parseDirectionHotkeyMap(directionHotkeysInput ? directionHotkeysInput.value : DEFAULT_DIRECTION_HOTKEYS, DEFAULT_DIRECTION_HOTKEYS),
     pauseHotkey: readHotkey(pauseHotkeyInput, DEFAULT_PAUSE_HOTKEY),
     skipHotkey: readHotkey(skipHotkeyInput, DEFAULT_SKIP_HOTKEY),
+    calmField: calmFieldInput ? calmFieldInput.checked : false,
+    calmFieldStrength: readNumber(calmFieldStrengthInput, 0.44, 0.05, 1),
+    calmFieldEdgeFade: readNumber(calmFieldEdgeFadeInput, 0.62, 0, 1),
     targets: emojiPool
   };
 }
@@ -240,6 +262,32 @@ function readSymbol(input, fallback) {
   if (!input) return fallback;
   const value = String(input.value || "").trim();
   return value.length ? value.slice(0, 4) : fallback;
+}
+
+function getTargetSymbolsForMode(mode) {
+  if (mode === "interferenceControl") return DEFAULT_INTERFERENCE_TARGET_SYMBOLS.slice();
+  return [readSymbol(targetSymbolInput, "✕")];
+}
+
+function getDistractorSymbolsForMode(mode) {
+  if (mode === "interferenceControl") return DEFAULT_INTERFERENCE_DISTRACTOR_SYMBOLS.slice();
+  return [readSymbol(distractorSymbolInput, "Y")];
+}
+
+function formatSymbolSet(symbols) {
+  return symbols.map((symbol) => String(symbol)).join("/");
+}
+
+function getTargetCueText(settings = getSettings()) {
+  return settings.targetSymbols.length > 1
+    ? `${formatSymbolSet(settings.targetSymbols)} target`
+    : settings.targetSymbol;
+}
+
+function getTargetCuePluralText(settings = getSettings()) {
+  return settings.targetSymbols.length > 1
+    ? `${formatSymbolSet(settings.targetSymbols)} targets`
+    : "targets";
 }
 
 function readHotkey(input, fallback) {
@@ -257,8 +305,8 @@ function parseHotkeyList(input, fallback) {
   return parsed.length ? parsed : fallback.map(normalizeHotkeyToken);
 }
 
-function parseDirectionHotkeyMap(raw) {
-  const source = String(raw || DEFAULT_DIRECTION_HOTKEYS);
+function parseDirectionHotkeyMap(raw, fallback = DEFAULT_DIRECTION_HOTKEYS) {
+  const source = String(raw || fallback);
   const map = {};
 
   source.split(";").forEach((entry) => {
@@ -272,13 +320,17 @@ function parseDirectionHotkeyMap(raw) {
     if (label && keys.length) map[label] = keys;
   });
 
-  return Object.keys(map).length ? map : parseDirectionHotkeyMap(DEFAULT_DIRECTION_HOTKEYS);
+  return Object.keys(map).length ? map : parseDirectionHotkeyMap(fallback, fallback);
 }
 
 function normalizeHotkeyToken(value) {
   const token = String(value || "").trim();
   if (!token) return "";
   const lower = token.toLowerCase().replace(/\s+/g, "");
+  const numpadDigit = /^numpad(\d)$/i.exec(token);
+  if (numpadDigit) return numpadDigit[1];
+  const digitKey = /^digit(\d)$/i.exec(token);
+  if (digitKey) return digitKey[1];
   const aliases = {
     space: " ",
     spacebar: " ",
@@ -311,7 +363,6 @@ function displayHotkey(hotkey) {
     delete: "Del"
   };
   if (names[token]) return names[token];
-  if (/^numpad\d$/i.test(token)) return `Num ${token.slice(-1)}`;
   if (/^key[a-z]$/i.test(token)) return token.slice(-1).toUpperCase();
   return token.length === 1 ? token.toUpperCase() : token;
 }
@@ -330,9 +381,17 @@ function serializeHotkeyToken(hotkey) {
     delete: "Delete"
   };
   if (names[token]) return names[token];
-  if (/^numpad\d$/i.test(token)) return `Numpad${token.slice(-1)}`;
   if (/^key[a-z]$/i.test(token)) return token.slice(-1).toUpperCase();
   return token.length === 1 ? token.toUpperCase() : token;
+}
+
+function escapeHtmlForTemplate(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function hotkeyFromEvent(event) {
@@ -388,28 +447,28 @@ function loadSavedFlashDuration(settings) {
   }
 }
 
- function loadSavedTrialGoal() {
-   try {
-     const raw = localStorage.getItem(TRIAL_GOAL_STATE_KEY);
-     if (!raw) return null;
+function loadSavedTrialGoal() {
+  try {
+    const raw = localStorage.getItem(TRIAL_GOAL_STATE_KEY);
+    if (!raw) return null;
 
-     const saved = JSON.parse(raw);
-     const mode = ["allTrials", "correctTrials"].includes(saved.mode) ? saved.mode : "allTrials";
-     const target = Math.round(clamp(Number(saved.target), 1, 999));
-     const completed = Math.round(clamp(Number(saved.completed), 0, target));
+    const saved = JSON.parse(raw);
+    const mode = ["allTrials", "correctTrials"].includes(saved.mode) ? saved.mode : "allTrials";
+    const target = Math.round(clamp(Number(saved.target), 1, 999));
+    const completed = Math.round(clamp(Number(saved.completed), 0, target));
 
-     if (!Number.isFinite(target) || target <= 0) return null;
+    if (!Number.isFinite(target) || target <= 0) return null;
 
-     return {
-       enabled: saved.enabled !== false && completed < target,
-       mode,
-       target,
-       completed
-     };
-   } catch (_) {
-     return null;
-   }
- }
+    return {
+      enabled: saved.enabled !== false && completed < target,
+      mode,
+      target,
+      completed
+    };
+  } catch (_) {
+    return null;
+  }
+}
 
 function saveFlashDuration() {
   try {
@@ -417,22 +476,22 @@ function saveFlashDuration() {
   } catch (_) {}
 }
 
- function saveTrialGoalState() {
-   try {
-     if (!trialGoal.target || trialGoal.target <= 0) {
-       localStorage.removeItem(TRIAL_GOAL_STATE_KEY);
-       return;
-     }
+function saveTrialGoalState() {
+  try {
+    if (!trialGoal.target || trialGoal.target <= 0) {
+      localStorage.removeItem(TRIAL_GOAL_STATE_KEY);
+      return;
+    }
 
-     localStorage.setItem(TRIAL_GOAL_STATE_KEY, JSON.stringify({
-       enabled: trialGoal.enabled,
-       mode: trialGoal.mode,
-       target: Math.round(trialGoal.target),
-       completed: Math.round(trialGoal.completed),
-       savedAt: Date.now()
-     }));
-   } catch (_) {}
- }
+    localStorage.setItem(TRIAL_GOAL_STATE_KEY, JSON.stringify({
+      enabled: trialGoal.enabled,
+      mode: trialGoal.mode,
+      target: Math.round(trialGoal.target),
+      completed: Math.round(trialGoal.completed),
+      savedAt: Date.now()
+    }));
+  } catch (_) {}
+}
 
 function wait(ms) {
   return new Promise((resolve) => {
@@ -486,6 +545,29 @@ function getDirectionHotkeys(direction) {
   if (number >= 1 && number <= 9) return [String(number)];
   if (number === 10) return ["0"];
   return [];
+}
+
+function getSplitKeyboardDirectionHotkeys(direction) {
+  const settings = getSettings();
+  const labelKeys = settings.splitKeyboardDirectionHotkeyMap[String(direction.label || "").toUpperCase()];
+  if (labelKeys && labelKeys.length) return labelKeys;
+
+  const number = direction.index + 1;
+  const numericLabelKeys = settings.splitKeyboardDirectionHotkeyMap[String(number)];
+  if (numericLabelKeys && numericLabelKeys.length) return numericLabelKeys;
+  if (number >= 1 && number <= 9) return [String(number)];
+  if (number === 10) return ["0"];
+  return [];
+}
+
+function getSplitKeyboardDirectionHotkey(direction) {
+  return displayHotkey(getSplitKeyboardDirectionHotkeys(direction)[0] || String(direction.index + 1));
+}
+
+function splitKeyboardDirectionFromConfiguredHotkey(event) {
+  return getDirections().find((direction) => {
+    return getSplitKeyboardDirectionHotkeys(direction).some((hotkey) => eventMatchesHotkey(event, hotkey));
+  }) || null;
 }
 
 function miniPositionFromDirection(angle, radiusPercent) {
@@ -542,6 +624,12 @@ function directionKey(direction) {
   return `${direction.index}:${direction.label}`;
 }
 
+function directionFromConfiguredHotkey(event) {
+  return getDirections().find((direction) => {
+    return getDirectionHotkeys(direction).some((hotkey) => eventMatchesHotkey(event, hotkey));
+  }) || null;
+}
+
 function directionSetKey(directions) {
   return directions.map(directionKey).sort().join(",");
 }
@@ -579,7 +667,8 @@ function startSession() {
   window.clearTimeout(pendingTimer);
   clearStage();
   sessionToken += 1;
-  state.skippable = false;
+  state.running = true;
+  state.paused = false;
   const token = sessionToken;
   state = createInitialState();
   activeSession = null;
@@ -587,7 +676,7 @@ function startSession() {
   ensureActiveSession();
   countdown.lastTick = null;
   updateTimerUi();
-  startOverlay.classList.add("hidden");
+  hideStartOverlayAnimated();
   pauseButton.classList.remove("hidden");
   updateLayout();
   updateStats();
@@ -598,10 +687,9 @@ function resetSession() {
   window.clearTimeout(pendingTimer);
   clearStage();
   sessionToken += 1;
-  setTrialCursorHidden(false);
   state = createInitialState();
   clearSessionGoal(false);
-  startOverlay.classList.remove("hidden");
+  startOverlay.classList.remove("hidden", "closing");
   pauseButton.classList.add("hidden");
   responseOverlay.classList.remove("visible", "feedback-mode", "peripheral-chooser");
   promptText.className = "";
@@ -674,6 +762,122 @@ function saveTrialTarget(target) {
   try {
     localStorage.setItem(TIMER_TRIAL_TARGET_KEY, String(target));
   } catch (_) {}
+}
+
+const UI_PANEL_ANIMATION_MS = 320;
+
+function onNextUiFrame(callback) {
+  requestAnimationFrame(() => requestAnimationFrame(callback));
+}
+
+function clearUiPanelTimer(element) {
+  if (!element || !element._ufovPanelTimer) return;
+  window.clearTimeout(element._ufovPanelTimer);
+  element._ufovPanelTimer = null;
+}
+
+function forceUiTransitionFrame(element) {
+  // Force one computed-style frame after removing display:none. Without this,
+  // browsers can coalesce the hidden -> open class change and skip transitions.
+  if (element) void element.offsetWidth;
+}
+
+function openAnimatedPanel(element, openClass = "open") {
+  if (!element) return false;
+
+  clearUiPanelTimer(element);
+  element.classList.remove(openClass, "closing");
+  element.classList.remove("hidden");
+  forceUiTransitionFrame(element);
+
+  requestAnimationFrame(() => {
+    if (!element.classList.contains("hidden")) element.classList.add(openClass);
+  });
+
+  return true;
+}
+
+function closeAnimatedPanel(element, options = {}) {
+  const {
+    openClass = "open",
+    closeMs = UI_PANEL_ANIMATION_MS,
+    hideWhenDone = true
+  } = options;
+
+  if (!element || element.classList.contains("closing")) return false;
+  if (hideWhenDone && element.classList.contains("hidden")) return false;
+  if (!hideWhenDone && !element.classList.contains(openClass)) return false;
+
+  clearUiPanelTimer(element);
+  element.classList.add("closing");
+  element.classList.remove(openClass);
+
+  element._ufovPanelTimer = window.setTimeout(() => {
+    element._ufovPanelTimer = null;
+    if (element.classList.contains(openClass)) return;
+    if (hideWhenDone) element.classList.add("hidden");
+    element.classList.remove("closing");
+  }, closeMs);
+
+  return true;
+}
+
+function closeProgressModalAnimated(modal = document.querySelector(".progress-modal:not(.hidden):not(.closing)")) {
+  if (!modal || modal.classList.contains("hidden") || modal.classList.contains("closing")) return false;
+
+  clearUiPanelTimer(modal);
+  modal.classList.add("closing");
+  modal.classList.remove("open");
+  modal._ufovPanelTimer = window.setTimeout(() => {
+    modal._ufovPanelTimer = null;
+    if (!modal.classList.contains("closing")) return;
+    modal.classList.add("hidden");
+    modal.classList.remove("closing");
+  }, UI_PANEL_ANIMATION_MS);
+
+  return true;
+}
+
+function installProgressModalMotionGuard() {
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target || !target.closest) return;
+
+    const closeButton = target.closest(".progress-close");
+    if (closeButton) {
+      const modal = closeButton.closest(".progress-modal");
+      if (closeProgressModalAnimated(modal)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+      return;
+    }
+
+    if (target.classList && target.classList.contains("progress-modal")) {
+      if (closeProgressModalAnimated(target)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }
+  }, true);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    if (closeProgressModalAnimated()) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  }, true);
+}
+
+function hideStartOverlayAnimated() {
+  if (!startOverlay || startOverlay.classList.contains("hidden")) return;
+
+  startOverlay.classList.add("closing");
+  window.setTimeout(() => {
+    startOverlay.classList.add("hidden");
+    startOverlay.classList.remove("closing");
+  }, 220);
 }
 
 function loadSavedCountdown() {
@@ -756,26 +960,21 @@ function initializeTimerControls() {
 
 function toggleTimerPanel() {
   if (!timerPanel) return;
-  if (timerPanel.classList.contains("hidden")) openTimerPanel();
+  if (timerPanel.classList.contains("hidden") || timerPanel.classList.contains("closing")) openTimerPanel();
   else closeTimerPanel();
 }
 
 function openTimerPanel() {
   if (!timerPanel) return;
-  timerPanel.classList.remove("hidden");
   updateTimerGoalFields();
   updateTimerUi();
-  window.requestAnimationFrame(() => timerPanel.classList.add("open"));
+  openAnimatedPanel(timerPanel);
   if (timerGoalModeSelect && timerGoalModeSelect.value === "time" && timerMinutesInput) timerMinutesInput.select();
   if (timerGoalModeSelect && timerGoalModeSelect.value !== "time" && timerTrialsInput) timerTrialsInput.select();
 }
 
 function closeTimerPanel() {
-  if (!timerPanel) return;
-  timerPanel.classList.remove("open");
-  window.setTimeout(() => {
-    if (!timerPanel.classList.contains("open")) timerPanel.classList.add("hidden");
-  }, 130);
+  closeAnimatedPanel(timerPanel);
 }
 
 function updateTimerGoalFields() {
@@ -1085,7 +1284,7 @@ function formatTrialGoal(mode, completed, target) {
   return `${prefix}${Math.round(completed)}/${Math.round(target)}`;
 }
 
- function updateTimerUi() {
+function updateTimerUi() {
   const hasTimeGoal = countdown.totalMs > 0 || countdown.remainingMs > 0;
   const activeTimeGoal = countdown.enabled && countdown.remainingMs > 0;
   const hasTrialGoal = trialGoal.target > 0;
@@ -1243,7 +1442,7 @@ function hideMask() {
 function buildSymbolMask() {
   const settings = getSettings();
   const count = settings.maskDensity;
-  const symbols = [settings.targetSymbol, settings.distractorSymbol];
+  const symbols = [...settings.targetSymbols, ...settings.distractorSymbols];
   for (let i = 0; i < count; i += 1) {
     const symbol = document.createElement("span");
     symbol.className = "mask-symbol";
@@ -1281,7 +1480,7 @@ function createPeripheralTarget(direction) {
   const settings = getSettings();
   const element = document.createElement("div");
   element.className = "peripheral-target visible";
-  element.textContent = settings.targetSymbol;
+  element.textContent = randomItem(settings.targetSymbols);
   const jitter = settings.stimulusArea === "full" ? 0.22 + Math.random() * 0.78 : 0.3 + Math.random() * 0.7;
   const radius = settings.peripheralRange * jitter;
   const position = positionFromDirection(direction.angle, radius);
@@ -1336,7 +1535,7 @@ function polarDistance(angleA, radiusA, angleB, radiusB) {
 function addDecoy(angle, radius) {
   const element = document.createElement("div");
   element.className = "decoy visible";
-  element.textContent = getSettings().distractorSymbol;
+  element.textContent = randomItem(getSettings().distractorSymbols);
   const position = positionFromDirection(angle, radius);
   element.style.left = position.x;
   element.style.top = position.y;
@@ -1418,7 +1617,6 @@ function presentSplitKeyboardResponse() {
   splitKeyboardResponse.active = true;
   splitKeyboardResponse.centerChoices = shuffle([state.current.center, state.current.decoy]);
   splitKeyboardResponse.requiredDirections = state.level >= 2 ? getRequiredPeripheralCount() : 0;
-  activeSplitKeyboardRefine = null;
 
   responseOverlay.classList.add("visible", "split-keyboard-mode");
   responseOverlay.classList.remove("hold-wheel-mode", "peripheral-chooser", "feedback-mode");
@@ -1453,7 +1651,17 @@ function getSplitKeyboardInstructionText() {
   const refineText = getDirections().length > 8
     ? ` · ${displayHotkey(settings.splitKeyboardCounterClockwiseHotkey)}/${displayHotkey(settings.splitKeyboardClockwiseHotkey)} refine` 
     : "";
-  return `${leftKey}/${rightKey} pick emoji · QWE/AD/ZXC choose direction${refineText}${targetCount > 1 ? ` · ${targetCount} targets` : ""}`;
+  return `${leftKey}/${rightKey} pick emoji · ${getSplitKeyboardDirectionHotkeySummary()} choose direction${refineText}${targetCount > 1 ? ` · ${targetCount} targets` : ""}`;
+}
+
+function getSplitKeyboardDirectionHotkeySummary() {
+  const directions = getDirections();
+  const labels = directions
+    .slice(0, directions.length <= 8 ? directions.length : 8)
+    .map((direction) => getSplitKeyboardDirectionHotkeys(direction)[0] || String(direction.index + 1))
+    .map(displayHotkey);
+  if (directions.length > 8) return `${labels.join("/")} + refine or custom direction keys`;
+  return labels.join("/");
 }
 
 function getSplitKeyboardRefineIconSvg(mode) {
@@ -1515,8 +1723,9 @@ function renderSplitKeyboardBoard() {
       button.type = "button";
       button.className = "split-keyboard-direction-key";
       button.dataset.directionIndex = String(direction.index);
-      button.innerHTML = `<strong>${slot.key}</strong><span>${direction.label}</span>`;
-      button.title = direction.name;
+      const hotkeyLabel = getSplitKeyboardDirectionHotkeys(direction).map(displayHotkey).join(", ") || slot.key;
+      button.innerHTML = `<strong>${escapeHtmlForTemplate(displayHotkey(getSplitKeyboardDirectionHotkeys(direction)[0] || slot.key))}</strong><span>${direction.label}</span>`;
+      button.title = `${direction.name}${hotkeyLabel ? ` · ${hotkeyLabel}` : ""}`;
       button.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -1554,14 +1763,14 @@ function getSplitKeyboardDirectionSlots() {
   const cardinalSlots = [
     null, { key: "W", angle: 90 }, null,
     { key: "A", angle: 180 }, null, { key: "D", angle: 0 },
-    null, { key: "X", angle: 270 }, null
+    null, { key: "S", angle: 270 }, null
   ];
   if (getDirections().length <= 4) return cardinalSlots;
 
   return [
     { key: "Q", angle: 135 }, { key: "W", angle: 90 }, { key: "E", angle: 45 },
     { key: "A", angle: 180 }, null, { key: "D", angle: 0 },
-    { key: "Z", angle: 225 }, { key: "X", angle: 270 }, { key: "C", angle: 315 }
+    { key: "Z", angle: 225 }, { key: "S", angle: 270 }, { key: "C", angle: 315 }
   ];
 }
 
@@ -1574,6 +1783,10 @@ function nearestDirectionByAngle(angle) {
   }, { direction: getDirections()[0], distance: Infinity }).direction;
 }
 
+function isPhysicalNumpadDirectionKey(event) {
+  return /^Numpad[1-9]$/i.test(event.code || "") && !/^Numpad5$/i.test(event.code || "");
+}
+
 function getSplitKeyboardKeyboardBaseAngle(event) {
   if (getDirections().length <= 4 && ["KeyQ", "KeyE", "KeyZ", "KeyC"].includes(event.code)) return null;
 
@@ -1584,7 +1797,7 @@ function getSplitKeyboardKeyboardBaseAngle(event) {
     KeyQ: 135,
     KeyA: 180,
     KeyZ: 225,
-    KeyX: 270,
+    KeyS: 270,
     KeyC: 315
   };
   if (event.code in keyMap) return keyMap[event.code];
@@ -1592,6 +1805,9 @@ function getSplitKeyboardKeyboardBaseAngle(event) {
 }
 
 function splitKeyboardDirectionFromKeyboard(event) {
+  const configuredDirection = splitKeyboardDirectionFromConfiguredHotkey(event);
+  if (configuredDirection) return configuredDirection;
+
   const baseAngle = getSplitKeyboardKeyboardBaseAngle(event);
   if (baseAngle === null) return null;
 
@@ -1607,9 +1823,14 @@ function splitKeyboardDirectionFromKeyboard(event) {
 
 function submitSplitKeyboardCenter(choice) {
   if (!splitKeyboardResponse.active || responseLock) return;
+  const previousCenter = splitKeyboardResponse.selectedCenter;
   splitKeyboardResponse.selectedCenter = choice;
   splitKeyboardResponse.selectedCenterIndex = splitKeyboardResponse.centerChoices.indexOf(choice);
   state.response.center = choice;
+  if (previousCenter && previousCenter !== choice) {
+    splitKeyboardResponse.selectedDirections = [];
+    state.response.peripherals = [];
+  }
 
   if (state.level === 1) {
     finishTrial();
@@ -1619,7 +1840,7 @@ function submitSplitKeyboardCenter(choice) {
   promptText.textContent = "Tap the target direction.";
   const count = splitKeyboardResponse.requiredDirections;
   const chosen = splitKeyboardResponse.selectedDirections.length;
-  feedbackText.textContent = count > 1 ? `${chosen}/${count} directions selected` : "Tap Q/W/E/A/D/Z/X/C.";
+  feedbackText.textContent = count > 1 ? `${chosen}/${count} directions selected` : `Tap ${getSplitKeyboardDirectionHotkeySummary()}.`;
   updateSplitKeyboardVisualState();
 }
 
@@ -1695,9 +1916,21 @@ function setSplitKeyboardRefineFromKeyboard(event, isDown) {
 
 function handleSplitKeyboardHotkey(event) {
   if (!splitKeyboardResponse.active || responseLock) return false;
-  if (event.repeat && setSplitKeyboardRefineFromKeyboard(event, true)) return true;
 
   const settings = getSettings();
+  const direction = splitKeyboardDirectionFromKeyboard(event);
+
+  if (event.repeat) {
+    if (setSplitKeyboardRefineFromKeyboard(event, true)) return true;
+    if (direction) return true;
+    return findHotkeyIndex(event, settings.splitKeyboardEmojiHotkeys) >= 0;
+  }
+
+  if (direction && isPhysicalNumpadDirectionKey(event)) {
+    submitSplitKeyboardDirection(direction);
+    return true;
+  }
+
   const centerIndex = findHotkeyIndex(event, settings.splitKeyboardEmojiHotkeys);
   if (centerIndex >= 0 && splitKeyboardResponse.centerChoices[centerIndex]) {
     submitSplitKeyboardCenter(splitKeyboardResponse.centerChoices[centerIndex]);
@@ -1706,7 +1939,6 @@ function handleSplitKeyboardHotkey(event) {
 
   if (setSplitKeyboardRefineFromKeyboard(event, true)) return true;
 
-  const direction = splitKeyboardDirectionFromKeyboard(event);
   if (direction) {
     submitSplitKeyboardDirection(direction);
     return true;
@@ -1718,7 +1950,6 @@ function handleSplitKeyboardHotkey(event) {
 function isSplitKeyboardResponseActive() {
   return splitKeyboardResponse.active && responseOverlay.classList.contains("split-keyboard-mode") && !responseLock;
 }
-
 
 function presentHoldWheelResponse() {
   responseLock = false;
@@ -1745,7 +1976,8 @@ function getHoldWheelInstructionText() {
   if (state.level === 1) return "Click the matching emoji.";
   const targetCount = getRequiredPeripheralCount();
   const directionCount = getDirections().length;
-  return `${directionCount} slices match Direction count.${targetCount > 1 ? ` Drag through ${targetCount} target slices before release.` : " Release on the target slice."}`;
+  const cancelKey = displayHotkey(getSettings().holdWheelCancelHotkey);
+  return `${directionCount} slices match Direction count.${targetCount > 1 ? ` Drag through ${targetCount} target slices before release.` : " Release on the target slice."} Press ${cancelKey} to cancel a held emoji.`;
 }
 
 function renderHoldWheelChoices() {
@@ -1779,8 +2011,8 @@ function renderHoldWheelChoices() {
     const hint = document.createElement("p");
     hint.className = "hold-wheel-hint";
     hint.textContent = getRequiredPeripheralCount() > 1
-      ? "Drag across each remembered target slice, then release."
-      : "Hold either emoji, move into the remembered slice, then release.";
+      ? `Drag across each remembered target slice, then release. ${displayHotkey(getSettings().holdWheelCancelHotkey)} cancels.` 
+      : `Hold either emoji, move into the remembered slice, then release. ${displayHotkey(getSettings().holdWheelCancelHotkey)} cancels.`;
     board.appendChild(hint);
   }
 
@@ -1878,7 +2110,9 @@ function showHoldWheel(clientX, clientY, centerEmoji) {
 
   const help = document.createElement("div");
   help.className = "hold-wheel-floating-help";
-  help.textContent = getRequiredPeripheralCount() > 1 ? "drag through slices" : "release on slice";
+  help.textContent = getRequiredPeripheralCount() > 1
+    ? `drag through slices · ${displayHotkey(getSettings().holdWheelCancelHotkey)} cancel` 
+    : `release on slice · ${displayHotkey(getSettings().holdWheelCancelHotkey)} cancel`;
   wheel.appendChild(help);
 
   document.body.appendChild(wheel);
@@ -1952,7 +2186,30 @@ function finalizeHoldWheelGesture() {
 
 function cancelHoldWheelGesture(event) {
   if (event && event.pointerId !== holdWheelResponse.pointerId) return;
+  cancelActiveHoldWheelGesture(true);
+}
+
+function isHoldWheelGestureActive() {
+  return isHoldWheelResponseActive() && holdWheelResponse.pointerId !== null;
+}
+
+function cancelActiveHoldWheelGesture(showMessage = true) {
+  if (!isHoldWheelGestureActive()) return false;
+
   cleanupHoldWheelGesture(true);
+  holdWheelResponse.selectedCenter = null;
+  holdWheelResponse.selectedDirections = [];
+  state.response.center = null;
+  state.response.peripherals = [];
+
+  if (showMessage) {
+    promptText.textContent = state.level === 1 ? "Pick the center emoji." : "Hold emoji, drag to location, release.";
+    feedbackText.className = "";
+    feedbackText.textContent = getHoldWheelInstructionText();
+  }
+
+  updateHoldWheelVisualState();
+  return true;
 }
 
 function cleanupHoldWheelGesture(cancelled) {
@@ -2045,9 +2302,10 @@ function presentPeripheralChooser() {
   stage.classList.add("selecting-location");
   const settings = getSettings();
   const count = getRequiredPeripheralCount();
-  promptText.textContent = count === 1 ? `Where was the ${settings.targetSymbol}?` : `Select all ${count} targets.`;
+  const targetCue = getTargetCueText(settings);
+  promptText.textContent = count === 1 ? `Where was the ${targetCue}?` : `Select all ${count} ${getTargetCuePluralText(settings)}.`;
   promptText.className = "";
-  feedbackText.textContent = count === 1 ? (settings.hotkeys ? "Click a slice or use direction hotkeys." : "Click a slice to choose location.") : `0/${count} selected`;
+  feedbackText.textContent = count === 1 ? "Click a slice or use direction hotkeys." : `0/${count} selected`;
   responseOverlay.classList.add("visible");
   createSectors();
   window.setTimeout(() => {
@@ -2416,9 +2674,7 @@ function handleChoiceHotkey(event) {
 
 function directionFromKeyboard(event) {
   const directions = getDirections();
-  const mappedDirection = directions.find((direction) => {
-    return getDirectionHotkeys(direction).some((hotkey) => eventMatchesHotkey(event, hotkey));
-  });
+  const mappedDirection = directionFromConfiguredHotkey(event);
   if (mappedDirection) return mappedDirection;
 
   const angleMap = {
@@ -2465,7 +2721,7 @@ function handleKeyboard(event) {
   const settings = getSettings();
   if (formTarget) {
     if (event.key === "Escape") {
-      settingsPanel.classList.remove("open");
+      closeSettingsPanel();
       closeTimerPanel();
       closeHotkeyPanel();
     }
@@ -2475,21 +2731,30 @@ function handleKeyboard(event) {
     if (event.key === "Escape") closeHotkeyPanel();
     return;
   }
+  if (settings.hotkeys && isHoldWheelGestureActive() && eventMatchesHotkey(event, settings.holdWheelCancelHotkey)) {
+    event.preventDefault();
+    cancelActiveHoldWheelGesture(true);
+    return;
+  }
   if (settings.hotkeys && isSplitKeyboardResponseActive() && handleChoiceHotkey(event)) {
     event.preventDefault();
     return;
   }
   if (settings.hotkeys && eventMatchesHotkey(event, settings.pauseHotkey)) {
     event.preventDefault();
-    if (state.running) togglePause();
+    if (!event.repeat && state.running) togglePause();
     return;
   }
   if (settings.hotkeys && eventMatchesHotkey(event, settings.skipHotkey)) {
+    if (event.repeat) {
+      event.preventDefault();
+      return;
+    }
     if (skipCurrentTrial()) event.preventDefault();
     return;
   }
   if (event.key === "Escape") {
-    settingsPanel.classList.remove("open");
+    closeSettingsPanel();
     closeTimerPanel();
     closeHotkeyPanel();
     return;
@@ -2563,6 +2828,7 @@ function applySettingExplainers() {
     fixationInput: "How long the center fixation cross appears before stimuli flash.",
     maskInput: "How long the post-flash mask stays visible.",
     symbolMaskInput: "Fills the mask with the current target and distractor symbols to create real visual noise.",
+    symbolModeSelect: "Single uses one target and one distractor. Interference control uses p/q targets and d/b distractors.",
     maskDensityInput: "How many symbols are placed into the mask noise screen.",
     correctDelayInput: "Delay after a correct response before the next trial.",
     missDelayInput: "Delay after a miss before the next trial.",
@@ -2633,12 +2899,12 @@ function applyHotkeyUiState() {
 function openHotkeyPanel() {
   if (!hotkeyPanel) return;
   renderHotkeyPanel();
-  hotkeyPanel.classList.remove("hidden");
+  openAnimatedPanel(hotkeyPanel);
 }
 
 function closeHotkeyPanel() {
   stopHotkeyCapture();
-  if (hotkeyPanel) hotkeyPanel.classList.add("hidden");
+  closeAnimatedPanel(hotkeyPanel);
 }
 
 function resetHotkeysToDefaults() {
@@ -2646,6 +2912,8 @@ function resetHotkeysToDefaults() {
   if (splitKeyboardEmojiHotkeysInput) splitKeyboardEmojiHotkeysInput.value = DEFAULT_SPLIT_KEYBOARD_EMOJI_HOTKEYS.join(",");
   if (splitKeyboardClockwiseHotkeyInput) splitKeyboardClockwiseHotkeyInput.value = DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY;
   if (splitKeyboardCounterClockwiseHotkeyInput) splitKeyboardCounterClockwiseHotkeyInput.value = DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY;
+  if (holdWheelCancelHotkeyInput) holdWheelCancelHotkeyInput.value = DEFAULT_HOLD_WHEEL_CANCEL_HOTKEY;
+  if (splitKeyboardDirectionHotkeysInput) splitKeyboardDirectionHotkeysInput.value = DEFAULT_SPLIT_KEYBOARD_DIRECTION_HOTKEYS;
   if (directionHotkeysInput) directionHotkeysInput.value = DEFAULT_DIRECTION_HOTKEYS;
   if (pauseHotkeyInput) pauseHotkeyInput.value = DEFAULT_PAUSE_HOTKEY;
   if (skipHotkeyInput) skipHotkeyInput.value = DEFAULT_SKIP_HOTKEY;
@@ -2711,6 +2979,16 @@ function renderHotkeyPanel() {
   addHotkeyButton(splitKeyboardGrid, "Refine counter", readHotkey(splitKeyboardCounterClockwiseHotkeyInput, DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY), (value) => {
     if (splitKeyboardCounterClockwiseHotkeyInput) splitKeyboardCounterClockwiseHotkeyInput.value = serializeHotkeyToken(value);
   });
+  getDirections().forEach((direction) => {
+    addHotkeyButton(splitKeyboardGrid, direction.name, getSplitKeyboardDirectionHotkeys(direction)[0] || "", (value) => {
+      setSplitKeyboardDirectionHotkey(direction.label, value);
+    });
+  });
+
+  const holdWheelGrid = createHotkeySection("Hold wheel");
+  addHotkeyButton(holdWheelGrid, "Cancel gesture", readHotkey(holdWheelCancelHotkeyInput, DEFAULT_HOLD_WHEEL_CANCEL_HOTKEY), (value) => {
+    if (holdWheelCancelHotkeyInput) holdWheelCancelHotkeyInput.value = serializeHotkeyToken(value);
+  });
 
   const directionGrid = createHotkeySection("Directions");
   getDirections().forEach((direction) => {
@@ -2765,9 +3043,26 @@ function setIndexedHotkey(input, index, value, fallback) {
 
 function setDirectionHotkey(label, value) {
   if (!directionHotkeysInput) return;
-  const map = parseDirectionHotkeyMap(directionHotkeysInput.value);
-  map[String(label).toUpperCase()] = [serializeHotkeyToken(value)];
+  const map = parseDirectionHotkeyMap(directionHotkeysInput.value, DEFAULT_DIRECTION_HOTKEYS);
+  setDirectionHotkeyInMap(map, label, value);
   directionHotkeysInput.value = serializeDirectionHotkeyMap(map);
+}
+
+function setSplitKeyboardDirectionHotkey(label, value) {
+  if (!splitKeyboardDirectionHotkeysInput) return;
+  const map = parseDirectionHotkeyMap(splitKeyboardDirectionHotkeysInput.value, DEFAULT_SPLIT_KEYBOARD_DIRECTION_HOTKEYS);
+  setDirectionHotkeyInMap(map, label, value);
+  splitKeyboardDirectionHotkeysInput.value = serializeDirectionHotkeyMap(map);
+}
+
+function setDirectionHotkeyInMap(map, label, value) {
+  const serialized = serializeHotkeyToken(value);
+  const normalized = normalizeHotkeyToken(serialized);
+  Object.keys(map).forEach((key) => {
+    map[key] = map[key].filter((hotkey) => normalizeHotkeyToken(hotkey) !== normalized);
+    if (!map[key].length) delete map[key];
+  });
+  map[String(label).toUpperCase()] = [serialized];
 }
 
 function serializeDirectionHotkeyMap(map) {
@@ -2797,6 +3092,7 @@ const allSettingInputs = [
   fixationInput,
   maskInput,
   symbolMaskInput,
+  symbolModeSelect,
   maskDensityInput,
   correctDelayInput,
   missDelayInput,
@@ -2809,23 +3105,37 @@ const allSettingInputs = [
   splitKeyboardEmojiHotkeysInput,
   splitKeyboardClockwiseHotkeyInput,
   splitKeyboardCounterClockwiseHotkeyInput,
+  holdWheelCancelHotkeyInput,
+  splitKeyboardDirectionHotkeysInput,
   directionHotkeysInput,
   pauseHotkeyInput,
   skipHotkeyInput,
   calmFieldInput,
+  calmFieldStrengthInput,
+  calmFieldEdgeFadeInput,
   peripheralTargetInput,
   rangeSlider,
   distractorInput
 ].filter(Boolean);
 
-startButton.addEventListener("click", startSession);
-settingsButton.addEventListener("click", () => settingsPanel.classList.add("open"));
-closeSettingsButton.addEventListener("click", () => settingsPanel.classList.remove("open"));
+function openSettingsPanel() {
+  openAnimatedPanel(settingsPanel);
+}
+
+function closeSettingsPanel() {
+  closeAnimatedPanel(settingsPanel, { hideWhenDone: false, closeMs: UI_PANEL_ANIMATION_MS });
+}
+
+startButton.addEventListener("click", () => {
+  startSession();
+});
+settingsButton.addEventListener("click", openSettingsPanel);
+closeSettingsButton.addEventListener("click", closeSettingsPanel);
 document.addEventListener("click", (event) => {
   if (!settingsPanel.classList.contains("open")) return;
   if (settingsPanel.contains(event.target)) return;
   if (settingsButton.contains(event.target)) return;
-  settingsPanel.classList.remove("open");
+  closeSettingsPanel();
 });
 calibrateButton.addEventListener("click", calibrateDisplay);
 resetButton.addEventListener("click", resetSession);
@@ -2906,6 +3216,7 @@ resetSettingsButton.addEventListener("click", () => {
     fixationInput: "600",
     maskInput: "90",
     symbolMaskInput: true,
+    symbolModeSelect: DEFAULT_SYMBOL_MODE,
     maskDensityInput: "140",
     correctDelayInput: "650",
     missDelayInput: "650",
@@ -2918,6 +3229,8 @@ resetSettingsButton.addEventListener("click", () => {
     splitKeyboardEmojiHotkeysInput: "ArrowLeft,ArrowRight",
     splitKeyboardClockwiseHotkeyInput: DEFAULT_SPLIT_KEYBOARD_CLOCKWISE_HOTKEY,
     splitKeyboardCounterClockwiseHotkeyInput: DEFAULT_SPLIT_KEYBOARD_COUNTER_CLOCKWISE_HOTKEY,
+    holdWheelCancelHotkeyInput: DEFAULT_HOLD_WHEEL_CANCEL_HOTKEY,
+    splitKeyboardDirectionHotkeysInput: DEFAULT_SPLIT_KEYBOARD_DIRECTION_HOTKEYS,
     directionHotkeysInput: DEFAULT_DIRECTION_HOTKEYS,
     pauseHotkeyInput: DEFAULT_PAUSE_HOTKEY,
     skipHotkeyInput: DEFAULT_SKIP_HOTKEY,
@@ -2966,7 +3279,12 @@ function initializeMobileWarning() {
 }
 
 function dismissMobileWarning() {
-  if (mobileWarning) mobileWarning.classList.remove("visible");
+  if (mobileWarning && mobileWarning.classList.contains("visible")) {
+    mobileWarning.classList.add("closing");
+    window.setTimeout(() => {
+      mobileWarning.classList.remove("visible", "closing");
+    }, 240);
+  }
   try {
     sessionStorage.setItem(MOBILE_WARNING_SESSION_KEY, "1");
   } catch (_) {}
@@ -2987,5 +3305,6 @@ applyCalmField();
 applyHotkeyUiState();
 renderHotkeyPanel();
 initializeTimerControls();
+installProgressModalMotionGuard();
 initializeMobileWarning();
 updateStats();
