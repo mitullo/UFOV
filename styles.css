@@ -351,7 +351,7 @@ h2 {
 .stimulus {
   position: absolute;
   z-index: 12;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: clamp(50px, 6vmin, 88px);
@@ -360,11 +360,13 @@ h2 {
   border-radius: 0;
   font-size: clamp(2.1rem, 4.8vmin, 3.8rem);
   filter: grayscale(1);
+  visibility: hidden;
+  will-change: visibility;
   pointer-events: none;
 }
 
 .stimulus.visible {
-  display: flex;
+  visibility: visible;
 }
 
 .center-stimulus {
@@ -379,7 +381,7 @@ h2 {
 .decoy {
   position: absolute;
   z-index: 12;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: clamp(50px, 6vmin, 88px);
@@ -391,19 +393,23 @@ h2 {
   font-size: clamp(1.4rem, 2.9vmin, 2.4rem);
   font-weight: 500;
   filter: grayscale(1);
+  visibility: hidden;
+  will-change: visibility;
   pointer-events: none;
 }
 
 .peripheral-target.visible,
 .decoy.visible {
-  display: flex;
+  visibility: visible;
 }
 
 .noise-mask {
   position: absolute;
   inset: 0;
   z-index: 20;
-  display: none;
+  display: block;
+  visibility: hidden;
+  will-change: visibility;
   opacity: 0.95;
   background-image:
     radial-gradient(circle, rgba(255, 255, 255, 0.22) 0 1px, transparent 1px 100%),
@@ -413,7 +419,7 @@ h2 {
 }
 
 .noise-mask.visible {
-  display: block;
+  visibility: visible;
   animation: maskJitter 120ms steps(2) infinite;
 }
 
@@ -4046,619 +4052,6 @@ body.hold-wheel-gesture-active {
   .hotkey-card,
   .hold-wheel-popover {
     transition-duration: 0.001ms !important;
-    animation-duration: 0.001ms !important;
-  }
-}
-
-/* Motion reliability patch: animate panels that are toggled with .hidden/.open/.visible. */
-:root {
-  --ui-motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --ui-motion-fast: 160ms;
-  --ui-motion-medium: 220ms;
-}
-
-.settings-panel,
-.timer-panel,
-.hotkey-panel,
-.progress-modal,
-.mobile-warning,
-.start-overlay {
-  will-change: opacity, transform;
-}
-
-.settings-panel {
-  opacity: 0;
-  transform: translateX(24px) scale(0.985);
-  transition:
-    opacity var(--ui-motion-medium) var(--ui-motion-ease),
-    transform var(--ui-motion-medium) var(--ui-motion-ease),
-    box-shadow var(--ui-motion-medium) var(--ui-motion-ease);
-}
-
-.settings-panel.open {
-  opacity: 1;
-  transform: translateX(0) scale(1);
-  box-shadow: -28px 0 80px rgba(0, 0, 0, 0.38);
-}
-
-.settings-panel.closing {
-  opacity: 0;
-  transform: translateX(20px) scale(0.985);
-  pointer-events: none;
-}
-
-.timer-panel {
-  opacity: 0;
-  transform: translateY(-8px) scale(0.98);
-  pointer-events: none;
-  transition:
-    opacity var(--ui-motion-fast) var(--ui-motion-ease),
-    transform var(--ui-motion-fast) var(--ui-motion-ease);
-}
-
-.timer-panel.open {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
-}
-
-.timer-panel.closing {
-  opacity: 0;
-  transform: translateY(-6px) scale(0.98);
-  pointer-events: none;
-}
-
-.hotkey-panel {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--ui-motion-medium) var(--ui-motion-ease);
-}
-
-.hotkey-panel.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.hotkey-panel.closing {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.hotkey-card {
-  opacity: 0;
-  transform: translateY(14px) scale(0.985);
-  transition:
-    opacity var(--ui-motion-medium) var(--ui-motion-ease),
-    transform var(--ui-motion-medium) var(--ui-motion-ease);
-}
-
-.hotkey-panel.open .hotkey-card {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-}
-
-.hotkey-panel.closing .hotkey-card {
-  opacity: 0;
-  transform: translateY(10px) scale(0.985);
-}
-
-.progress-modal {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--ui-motion-medium) var(--ui-motion-ease);
-  animation: none !important;
-}
-
-.progress-modal:not(.hidden):not(.closing) {
-  opacity: 1;
-  pointer-events: auto;
-  animation: none !important;
-}
-
-.progress-window {
-  opacity: 0;
-  transform: translateY(16px) scale(0.985);
-  transition:
-    opacity var(--ui-motion-medium) var(--ui-motion-ease),
-    transform var(--ui-motion-medium) var(--ui-motion-ease);
-  animation: none !important;
-}
-
-.progress-modal:not(.hidden):not(.closing) .progress-window {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  animation: none !important;
-}
-
-.progress-modal.closing {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.progress-modal.closing .progress-window {
-  opacity: 0;
-  transform: translateY(10px) scale(0.985);
-}
-
-.mobile-warning {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--ui-motion-medium) var(--ui-motion-ease);
-}
-
-.mobile-warning.visible {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.mobile-warning.closing {
-  display: grid;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.mobile-warning-card {
-  transform: translateY(10px) scale(0.985);
-  transition:
-    opacity var(--ui-motion-medium) var(--ui-motion-ease),
-    transform var(--ui-motion-medium) var(--ui-motion-ease);
-}
-
-.mobile-warning.visible .mobile-warning-card {
-  transform: translateY(0) scale(1);
-}
-
-.mobile-warning.closing .mobile-warning-card {
-  transform: translateY(8px) scale(0.985);
-}
-
-.start-overlay {
-  opacity: 1;
-  transition: opacity 180ms var(--ui-motion-ease);
-}
-
-.start-overlay.closing {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.icon-button,
-.primary-button,
-.secondary-button,
-.choice-button,
-.hotkey-capture-button,
-.progress-tab,
-.progress-close,
-.timer-close,
-input,
-select,
-textarea {
-  transition:
-    transform var(--ui-motion-fast) var(--ui-motion-ease),
-    opacity var(--ui-motion-fast) var(--ui-motion-ease),
-    border-color var(--ui-motion-fast) var(--ui-motion-ease),
-    background-color var(--ui-motion-fast) var(--ui-motion-ease),
-    background var(--ui-motion-fast) var(--ui-motion-ease),
-    box-shadow var(--ui-motion-fast) var(--ui-motion-ease),
-    filter var(--ui-motion-fast) var(--ui-motion-ease);
-}
-
-.settings-grid label:not(.toggle-row),
-.hotkey-section,
-.timer-card,
-.progress-window,
-.choice-button {
-  transition:
-    transform var(--ui-motion-fast) var(--ui-motion-ease),
-    border-color var(--ui-motion-fast) var(--ui-motion-ease),
-    background var(--ui-motion-fast) var(--ui-motion-ease),
-    box-shadow var(--ui-motion-fast) var(--ui-motion-ease);
-}
-
-.settings-grid label:not(.toggle-row):hover,
-.hotkey-section:hover {
-  border-color: rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.response-overlay.visible .choice-button,
-.split-keyboard-board,
-.hold-wheel-board {
-  animation: uiPanelFloatIn 180ms var(--ui-motion-ease) both;
-}
-
-.direction-hotkey-chip,
-.split-keyboard-direction-key,
-.split-keyboard-emoji-choice,
-.hold-wheel-emoji-choice {
-  transition:
-    transform var(--ui-motion-fast) var(--ui-motion-ease),
-    border-color var(--ui-motion-fast) var(--ui-motion-ease),
-    background var(--ui-motion-fast) var(--ui-motion-ease),
-    box-shadow var(--ui-motion-fast) var(--ui-motion-ease);
-}
-
-@keyframes uiPanelFloatIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-panel,
-  .timer-panel,
-  .hotkey-panel,
-  .hotkey-card,
-  .progress-modal,
-  .progress-window,
-  .mobile-warning,
-  .mobile-warning-card,
-  .start-overlay,
-  .response-overlay.visible .choice-button,
-  .split-keyboard-board,
-  .hold-wheel-board {
-    transition-duration: 0.001ms !important;
-    animation-duration: 0.001ms !important;
-  }
-}
-
-/* Click-safe motion fix: invisible panels must not sit on top of controls. */
-.settings-panel {
-  opacity: 0;
-  transform: translateX(100%) scale(0.985);
-  pointer-events: none;
-  transition:
-    opacity var(--ui-motion-medium, 220ms) var(--ui-motion-ease, ease),
-    transform var(--ui-motion-medium, 220ms) var(--ui-motion-ease, ease),
-    box-shadow var(--ui-motion-medium, 220ms) var(--ui-motion-ease, ease);
-}
-
-.settings-panel.open {
-  opacity: 1;
-  transform: translateX(0) scale(1);
-  pointer-events: auto;
-  box-shadow: -28px 0 80px rgba(0, 0, 0, 0.38);
-}
-
-.settings-panel.closing {
-  opacity: 0;
-  transform: translateX(100%) scale(0.985);
-  pointer-events: none;
-}
-
-.timer-panel {
-  opacity: 0;
-  transform: translateY(-10px) scale(0.975);
-  transform-origin: 52px 0;
-  pointer-events: none;
-  transition:
-    opacity 220ms var(--ui-motion-ease, ease),
-    transform 220ms var(--ui-motion-ease, ease);
-  animation: none !important;
-}
-
-.timer-panel.open {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
-}
-
-.timer-panel.closing {
-  opacity: 0;
-  transform: translateY(-8px) scale(0.975);
-  pointer-events: none;
-}
-
-.timer-panel .timer-card {
-  transition:
-    opacity 220ms var(--ui-motion-ease, ease),
-    transform 220ms var(--ui-motion-ease, ease),
-    box-shadow 220ms var(--ui-motion-ease, ease),
-    border-color 160ms var(--ui-motion-ease, ease);
-}
-
-.timer-panel:not(.open) .timer-card {
-  opacity: 0;
-  transform: translateY(-4px);
-}
-
-.timer-panel.open .timer-card {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.progress-modal {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--ui-motion-medium, 220ms) var(--ui-motion-ease, ease);
-  animation: none !important;
-}
-
-.progress-modal.open:not(.closing) {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.progress-modal.open:not(.closing) .progress-window {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  animation: none !important;
-}
-
-.progress-modal.closing {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.progress-modal.closing .progress-window,
-.progress-modal:not(.open) .progress-window {
-  opacity: 0;
-  transform: translateY(14px) scale(0.985);
-}
-
-.progress-window {
-  transition:
-    opacity var(--ui-motion-medium, 220ms) var(--ui-motion-ease, ease),
-    transform var(--ui-motion-medium, 220ms) var(--ui-motion-ease, ease);
-}
-
-.hotkey-panel,
-.mobile-warning {
-  pointer-events: none;
-}
-
-.hotkey-panel.open,
-.mobile-warning.visible:not(.closing) {
-  pointer-events: auto;
-}
-
-.hotkey-panel.closing,
-.mobile-warning.closing {
-  pointer-events: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-panel,
-  .timer-panel,
-  .timer-panel .timer-card,
-  .progress-modal,
-  .progress-window {
-    transition-duration: 0.001ms !important;
-  }
-}
-
-
-/* ------------------------------------------------------------------
-   Visible motion override: explicit keyframes beat coalesced display
-   toggles and earlier `animation: none !important` rules. These animate
-   `translate` / `scale` so earlier `transform: ... !important` safety
-   rules cannot suppress the motion.
-   ------------------------------------------------------------------ */
-:root {
-  --ui-motion-visible-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --ui-motion-visible-out: cubic-bezier(0.55, 0.06, 0.68, 0.19);
-}
-
-.settings-panel,
-.timer-panel,
-.hotkey-panel,
-.hotkey-card,
-.progress-modal,
-.progress-window,
-.mobile-warning,
-.mobile-warning-card,
-.start-overlay {
-  backface-visibility: hidden;
-  transform-style: preserve-3d;
-  transform: translate3d(0, 0, 0) scale(1);
-}
-
-.settings-panel.open {
-  animation: ufovSettingsIn 320ms var(--ui-motion-visible-ease) both !important;
-}
-
-.settings-panel.closing {
-  animation: ufovSettingsOut 260ms var(--ui-motion-visible-out) both !important;
-}
-
-.timer-panel.open {
-  animation: ufovTimerIn 260ms var(--ui-motion-visible-ease) both !important;
-}
-
-.timer-panel.closing {
-  animation: ufovTimerOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-.timer-panel.open .timer-card {
-  animation: ufovTimerCardIn 300ms var(--ui-motion-visible-ease) both !important;
-}
-
-.timer-panel.closing .timer-card {
-  animation: ufovTimerCardOut 200ms var(--ui-motion-visible-out) both !important;
-}
-
-.hotkey-panel.open {
-  animation: ufovBackdropIn 260ms var(--ui-motion-visible-ease) both !important;
-}
-
-.hotkey-panel.closing {
-  animation: ufovBackdropOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-.hotkey-panel.open .hotkey-card {
-  animation: ufovDialogIn 320ms var(--ui-motion-visible-ease) both !important;
-}
-
-.hotkey-panel.closing .hotkey-card {
-  animation: ufovDialogOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-.progress-modal.open:not(.closing),
-.progress-modal:not(.hidden):not(.closing) {
-  animation: ufovBackdropIn 260ms var(--ui-motion-visible-ease) both !important;
-}
-
-.progress-modal.closing {
-  animation: ufovBackdropOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-.progress-modal.open:not(.closing) .progress-window,
-.progress-modal:not(.hidden):not(.closing) .progress-window {
-  animation: ufovDialogIn 320ms var(--ui-motion-visible-ease) both !important;
-}
-
-.progress-modal.closing .progress-window {
-  animation: ufovDialogOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-.mobile-warning.visible:not(.closing) {
-  animation: ufovBackdropIn 260ms var(--ui-motion-visible-ease) both !important;
-}
-
-.mobile-warning.visible:not(.closing) .mobile-warning-card {
-  animation: ufovDialogIn 320ms var(--ui-motion-visible-ease) both !important;
-}
-
-.mobile-warning.closing {
-  animation: ufovBackdropOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-.mobile-warning.closing .mobile-warning-card {
-  animation: ufovDialogOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-.start-overlay.closing {
-  animation: ufovBackdropOut 220ms var(--ui-motion-visible-out) both !important;
-}
-
-@keyframes ufovSettingsIn {
-  0% {
-    opacity: 0;
-    transform: translate3d(100%, 0, 0) scale(0.985);
-  }
-  65% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes ufovSettingsOut {
-  0% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(100%, 0, 0) scale(0.985);
-  }
-}
-
-@keyframes ufovTimerIn {
-  0% {
-    opacity: 0;
-    transform: translate3d(0, -18px, 0) scale(0.94);
-  }
-  100% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes ufovTimerOut {
-  0% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(0, -14px, 0) scale(0.95);
-  }
-}
-
-@keyframes ufovTimerCardIn {
-  0% {
-    opacity: 0;
-    transform: translate3d(0, -10px, 0) scale(0.96);
-  }
-  100% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes ufovTimerCardOut {
-  0% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(0, -8px, 0) scale(0.965);
-  }
-}
-
-@keyframes ufovBackdropIn {
-  0% { opacity: 0; }
-  100% { opacity: 1; }
-}
-
-@keyframes ufovBackdropOut {
-  0% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-@keyframes ufovDialogIn {
-  0% {
-    opacity: 0;
-    transform: translate3d(0, 28px, 0) scale(0.94);
-  }
-  100% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-@keyframes ufovDialogOut {
-  0% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(0, 20px, 0) scale(0.955);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .settings-panel.open,
-  .settings-panel.closing,
-  .timer-panel.open,
-  .timer-panel.closing,
-  .timer-panel.open .timer-card,
-  .timer-panel.closing .timer-card,
-  .hotkey-panel.open,
-  .hotkey-panel.closing,
-  .hotkey-panel.open .hotkey-card,
-  .hotkey-panel.closing .hotkey-card,
-  .progress-modal.open:not(.closing),
-  .progress-modal:not(.hidden):not(.closing),
-  .progress-modal.closing,
-  .progress-modal.open:not(.closing) .progress-window,
-  .progress-modal:not(.hidden):not(.closing) .progress-window,
-  .progress-modal.closing .progress-window,
-  .mobile-warning.visible:not(.closing),
-  .mobile-warning.visible:not(.closing) .mobile-warning-card,
-  .mobile-warning.closing,
-  .mobile-warning.closing .mobile-warning-card,
-  .start-overlay.closing {
     animation-duration: 0.001ms !important;
   }
 }

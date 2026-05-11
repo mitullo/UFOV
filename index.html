@@ -194,12 +194,12 @@
 
           <label>
             Start flash ms
-            <input type="number" id="startDurationInput" min="16" max="1000" value="500" />
+            <input type="number" id="startDurationInput" min="16" max="1000" value="500" step="1" />
           </label>
 
           <label>
             Minimum flash ms
-            <input type="number" id="minDurationInput" min="4" max="100" value="16" />
+            <input type="number" id="minDurationInput" min="16" max="100" value="16" step="1" />
           </label>
 
           <label>
@@ -235,14 +235,6 @@
           <label>
             Miss delay ms
             <input type="number" id="missDelayInput" min="0" max="3000" value="650" />
-          </label>
-
-          <label>
-            Symbol mode
-            <select id="symbolModeSelect">
-              <option value="single" selected>Single target/distractor</option>
-              <option value="interferenceControl">Interference control (p/q vs d/b)</option>
-            </select>
           </label>
 
           <label>
@@ -296,7 +288,7 @@
 
           <label>
             Distractors
-            <input type="number" id="distractorInput" min="0" max="47" value="18" />
+            <input type="number" id="distractorInput" min="0" max="47" value="20" />
           </label>
 
           <button type="button" id="resetSettingsButton" class="reset-settings-btn wide">Reset settings</button>

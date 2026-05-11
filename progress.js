@@ -183,42 +183,26 @@ window.UFOVProgress = (() => {
     return modal;
   }
 
-  function clearModalTimer() {
-    if (!modal || !modal._ufovPanelTimer) return;
-    window.clearTimeout(modal._ufovPanelTimer);
-    modal._ufovPanelTimer = null;
-  }
-
   function open() {
     createModal();
-    clearModalTimer();
-    modal.classList.remove("open", "closing");
-    modal.classList.remove("hidden");
-    // Force a visible closed frame so opacity/transform transitions run reliably.
-    void modal.offsetWidth;
-    requestAnimationFrame(() => {
-      if (modal && !modal.classList.contains("hidden")) modal.classList.add("open");
-    });
+    modal.classList.remove("hidden", "closing");
     syncActiveTabUi();
     render();
   }
 
   function close() {
-    if (!modal || modal.classList.contains("hidden") || modal.classList.contains("closing")) return;
+    if (!modal || modal.classList.contains("hidden")) return;
     if (chartRenderFrame !== null) {
       cancelAnimationFrame(chartRenderFrame);
       chartRenderFrame = null;
     }
     hideChartTooltip();
-    clearModalTimer();
     modal.classList.add("closing");
-    modal.classList.remove("open");
-    modal._ufovPanelTimer = window.setTimeout(() => {
+    window.setTimeout(() => {
       if (!modal || !modal.classList.contains("closing")) return;
-      modal._ufovPanelTimer = null;
       modal.classList.add("hidden");
       modal.classList.remove("closing");
-    }, 320);
+    }, 180);
   }
 
   function clearHistory() {
