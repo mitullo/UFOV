@@ -8,10 +8,13 @@ window.UFOVProgress = (() => {
   let modal = null;
   let activeTab = "recent";
   let chartTooltip = null;
+  let activeChartTooltipKey = "";
   let chartHoverPoints = [];
   let chartRenderFrame = null;
   let chartResizeObserver = null;
   let expandedSessions = new Set();
+  let chartAnimProgress = 1;
+  let chartAnimFrame = null;
 
   const CHART_Y_MIN = -8;
   const CHART_Y_MAX = 105;
@@ -125,7 +128,7 @@ window.UFOVProgress = (() => {
           </div>
 
           <div class="progress-panel hidden" data-panel="chart">
-            <div class="chart-summary" id="chartSummary"></div>
+            <div class="activity-graph" id="activityGraph"></div>
             <div class="chart-card">
               <div class="chart-wrap">
                 <canvas id="progressCanvas" width="1200" height="470"></canvas>
@@ -186,7 +189,12 @@ window.UFOVProgress = (() => {
   function open() {
     createModal();
     modal.classList.remove("hidden", "closing");
+    void modal.offsetHeight;
     syncActiveTabUi();
+    if (activeTab === "chart") {
+      chartAnimProgress = 0;
+      startChartAnimation();
+    }
     render();
   }
 
@@ -196,6 +204,11 @@ window.UFOVProgress = (() => {
       cancelAnimationFrame(chartRenderFrame);
       chartRenderFrame = null;
     }
+    if (chartAnimFrame) {
+      cancelAnimationFrame(chartAnimFrame);
+      chartAnimFrame = null;
+    }
+    chartAnimProgress = 1;
     hideChartTooltip();
     modal.classList.add("closing");
     window.setTimeout(() => {
@@ -205,7 +218,30 @@ window.UFOVProgress = (() => {
     }, 180);
   }
 
+  let clearConfirmTimer = null;
+
   function clearHistory() {
+    const btn = modal ? modal.querySelector(".progress-clear") : null;
+    if (!btn || btn.dataset.confirming !== "true") {
+      if (btn) {
+        btn.dataset.confirming = "true";
+        btn.textContent = "Are you sure?";
+      }
+      clearTimeout(clearConfirmTimer);
+      clearConfirmTimer = setTimeout(() => {
+        if (btn) {
+          btn.dataset.confirming = "";
+          btn.textContent = "Clear history";
+        }
+      }, 3000);
+      return;
+    }
+
+    clearTimeout(clearConfirmTimer);
+    clearConfirmTimer = null;
+    btn.dataset.confirming = "";
+    btn.textContent = "Clear history";
+
     try {
       localStorage.removeItem(STORAGE_KEY);
       localStorage.removeItem(SESSION_STORAGE_KEY);
@@ -217,8 +253,38 @@ window.UFOVProgress = (() => {
   function setTab(tab) {
     activeTab = tab;
 
+    if (tab === "chart") {
+      chartAnimProgress = 0;
+      startChartAnimation();
+    }
+
     syncActiveTabUi();
     render();
+  }
+
+  function startChartAnimation() {
+    if (chartAnimFrame) cancelAnimationFrame(chartAnimFrame);
+    const duration = 420;
+    const startTime = performance.now();
+    const history = loadHistory();
+    const sessions = loadSessions();
+
+    function tick(now) {
+      const elapsed = now - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      chartAnimProgress = 1 - Math.pow(1 - t, 3);
+
+      renderChartCanvasOnly(history);
+
+      if (t < 1) {
+        chartAnimFrame = requestAnimationFrame(tick);
+      } else {
+        chartAnimFrame = null;
+        renderChart(history, sessions);
+      }
+    }
+
+    chartAnimFrame = requestAnimationFrame(tick);
   }
 
   function syncActiveTabUi() {
@@ -251,10 +317,12 @@ window.UFOVProgress = (() => {
       chartRenderFrame = null;
     }
 
+    const sessions = loadSessions();
+
     chartRenderFrame = requestAnimationFrame(() => {
       chartRenderFrame = requestAnimationFrame(() => {
         chartRenderFrame = null;
-        renderChart(history);
+        renderChart(history, sessions);
       });
     });
   }
@@ -435,9 +503,81 @@ window.UFOVProgress = (() => {
     return padding.top + chartHeight - normalized * chartHeight;
   }
 
-  function renderChart(history) {
+  function renderChartCanvasOnly(history) {
     const canvas = document.getElementById("progressCanvas");
-    const summary = document.getElementById("chartSummary");
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    const pixelRatio = Number(canvas.dataset.chartPixelRatio) || 1;
+    const width = Number(canvas.dataset.chartWidth) || Math.round(canvas.width / pixelRatio);
+    const height = Number(canvas.dataset.chartHeight) || Math.round(canvas.height / pixelRatio);
+    const chartState = getChartData(history);
+    const data = chartState.rows;
+
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
+    ctx.fillStyle = "#050505";
+    ctx.fillRect(0, 0, width, height);
+
+    if (!data.length) {
+      drawCenteredText(ctx, "Complete a matching progress check to show a chart.", width, height);
+      return;
+    }
+
+    const padding = {
+      left: 72,
+      right: 48,
+      top: 46,
+      bottom: 76
+    };
+
+    const chartWidth = width - padding.left - padding.right;
+    const chartHeight = height - padding.top - padding.bottom;
+    const chartX = (index) => data.length === 1
+      ? padding.left + chartWidth / 2
+      : padding.left + (index / (data.length - 1)) * chartWidth;
+
+    drawGrid(ctx, padding, chartWidth, chartHeight);
+    drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight);
+    drawDateAxisLabels(ctx, padding, chartWidth, chartHeight, data);
+    drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.targetAccuracy, "#fbbf24", "target");
+    drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.regressAccuracy, "#fb7185", "regress");
+
+    const difficultyPoints = data.map((row, index) => {
+      const x = chartX(index);
+      const value = difficultyScore(row, chartState.current);
+      const y = percentToChartY(value, padding, chartHeight);
+      return { x, y, row, index, metric: "Difficulty", value };
+    });
+
+    const accuracyPoints = data.map((row, index) => {
+      const x = chartX(index);
+      const value = Number(row.accuracy) || 0;
+      const y = percentToChartY(value, padding, chartHeight);
+      return { x, y, row, index, metric: "Accuracy", value };
+    });
+
+    const bottomY = padding.top + chartHeight;
+    const animDiffPoints = difficultyPoints.map((p) => ({
+      ...p,
+      y: bottomY + (p.y - bottomY) * chartAnimProgress
+    }));
+    const animAccPoints = accuracyPoints.map((p) => ({
+      ...p,
+      y: bottomY + (p.y - bottomY) * chartAnimProgress
+    }));
+
+    drawLine(ctx, animDiffPoints, "#8b5cf6", 3);
+    drawLine(ctx, animAccPoints, "#22c55e", 3);
+    drawDots(ctx, animDiffPoints, "#8b5cf6", 4.5);
+    drawDots(ctx, animAccPoints, "#22c55e", 4.5);
+  }
+
+  function renderChart(history, sessions) {
+    const canvas = document.getElementById("progressCanvas");
     const passiveDates = document.getElementById("chartPassiveDates");
     if (!canvas) return;
 
@@ -458,8 +598,13 @@ window.UFOVProgress = (() => {
     ctx.fillStyle = "#050505";
     ctx.fillRect(0, 0, width, height);
 
-    if (summary) {
-      summary.innerHTML = renderSummary(data, chartState.scope, chartState.current);
+    const graph = document.getElementById("activityGraph");
+    if (graph) {
+      const activityHtml = renderActivityGraph(history, sessions);
+      if (graph._ufovActivityHtml !== activityHtml) {
+        graph.innerHTML = activityHtml;
+        graph._ufovActivityHtml = activityHtml;
+      }
     }
 
     if (passiveDates) {
@@ -486,6 +631,7 @@ window.UFOVProgress = (() => {
 
     drawGrid(ctx, padding, chartWidth, chartHeight);
     drawPercentAxisLabels(ctx, padding, chartWidth, chartHeight);
+    drawDateAxisLabels(ctx, padding, chartWidth, chartHeight, data);
     drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.targetAccuracy, "#fbbf24", "target");
     drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, chartState.current.regressAccuracy, "#fb7185", "regress");
 
@@ -512,15 +658,21 @@ window.UFOVProgress = (() => {
       return { x, y, row, index, metric: "Accuracy", value };
     });
 
-    drawLine(ctx, difficultyPoints, "#8b5cf6", 3);
-    drawLine(ctx, accuracyPoints, "#22c55e", 3);
-    drawDots(ctx, difficultyPoints, "#8b5cf6", 4.5);
-    drawDots(ctx, accuracyPoints, "#22c55e", 4.5);
-    chartHoverPoints = [...difficultyPoints, ...accuracyPoints];
+    const bottomY = padding.top + chartHeight;
+    const animDiffPoints = difficultyPoints.map((p) => ({
+      ...p,
+      y: bottomY + (p.y - bottomY) * chartAnimProgress
+    }));
+    const animAccPoints = accuracyPoints.map((p) => ({
+      ...p,
+      y: bottomY + (p.y - bottomY) * chartAnimProgress
+    }));
 
-    ctx.fillStyle = "#d6d3d1";
-    ctx.font = "800 16px Inter, system-ui, sans-serif";
-    ctx.fillText("Higher is better: faster flash difficulty and accuracy", Math.round(padding.left), 30);
+    drawLine(ctx, animDiffPoints, "#8b5cf6", 3);
+    drawLine(ctx, animAccPoints, "#22c55e", 3);
+    drawDots(ctx, animDiffPoints, "#8b5cf6", 4.5);
+    drawDots(ctx, animAccPoints, "#22c55e", 4.5);
+    chartHoverPoints = [...difficultyPoints, ...accuracyPoints];
   }
 
   function handleChartHover(event) {
@@ -543,30 +695,42 @@ window.UFOVProgress = (() => {
       return;
     }
 
-    chartTooltip.innerHTML = renderChartTooltip(nearest.point);
+    const tooltipKey = `${nearest.point.metric}:${nearest.point.index}:${nearest.point.row.date || ""}`;
+    if (activeChartTooltipKey !== tooltipKey) {
+      chartTooltip.innerHTML = renderChartTooltip(nearest.point);
+      activeChartTooltipKey = tooltipKey;
+    }
     chartTooltip.classList.remove("hidden");
 
     const wrap = canvas.closest(".chart-wrap");
+    if (!wrap) return;
+
     const wrapRect = wrap.getBoundingClientRect();
-    let left = event.clientX - wrapRect.left + 14;
-    let top = event.clientY - wrapRect.top + 14;
+    const canvasRect = canvas.getBoundingClientRect();
+    const canvasLeft = canvasRect.left - wrapRect.left;
+    const canvasTop = canvasRect.top - wrapRect.top;
+    const pointCssX = nearest.point.x / scaleX;
+    const pointCssY = nearest.point.y / scaleY;
+    let left = canvasLeft + pointCssX + 14;
+    let top = canvasTop + pointCssY + 14;
 
     const maxLeft = wrap.clientWidth - chartTooltip.offsetWidth - 10;
     const maxTop = wrap.clientHeight - chartTooltip.offsetHeight - 10;
 
     if (left > maxLeft) {
-      left = event.clientX - wrapRect.left - chartTooltip.offsetWidth - 14;
+      left = canvasLeft + pointCssX - chartTooltip.offsetWidth - 14;
     }
 
     if (top > maxTop) {
-      top = event.clientY - wrapRect.top - chartTooltip.offsetHeight - 14;
+      top = canvasTop + pointCssY - chartTooltip.offsetHeight - 14;
     }
 
-    chartTooltip.style.left = `${clamp(left, 10, Math.max(10, maxLeft))}px`;
-    chartTooltip.style.top = `${clamp(top, 10, Math.max(10, maxTop))}px`;
+    chartTooltip.style.left = `${clamp(Math.round(left), 10, Math.max(10, maxLeft))}px`;
+    chartTooltip.style.top = `${clamp(Math.round(top), 10, Math.max(10, maxTop))}px`;
   }
 
   function hideChartTooltip() {
+    activeChartTooltipKey = "";
     if (chartTooltip) chartTooltip.classList.add("hidden");
   }
 
@@ -802,32 +966,106 @@ window.UFOVProgress = (() => {
     return clamp(((max - flash) / (max - min)) * 100, 0, 100);
   }
 
-  function renderSummary(data, scope, current) {
-    if (!data.length) {
-      return `
-        <div><strong>Checks</strong><span>0</span></div>
-        <div><strong>Scope</strong><span>${escapeHtml(scope)}</span></div>
-        <div><strong>Latest flash</strong><span>—</span></div>
-        <div><strong>Trend</strong><span>—</span></div>
-      `;
+  function renderActivityGraph(history, sessions) {
+    const now = new Date();
+    const totalDays = 365;
+    const cellSize = 10;
+    const cellGap = 2;
+    const labelWidth = 30;
+    const weekCount = Math.ceil(totalDays / 7);
+
+    const dayCounts = {};
+    const allRecords = [
+      ...history.map((r) => ({ date: r.date || 0, trials: r.trials || 1 })),
+      ...(sessions || []).map((s) => ({ date: s.date || 0, trials: (s.trials || []).length || 1 }))
+    ];
+
+    allRecords.forEach((r) => {
+      const d = new Date(r.date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      dayCounts[key] = (dayCounts[key] || 0) + r.trials;
+    });
+
+    const maxCount = Math.max(1, ...Object.values(dayCounts));
+    const levels = [0, 1, 15, 30, 45];
+
+    function getLevel(count) {
+      if (!count) return 0;
+      const pct = (count / maxCount) * 100;
+      if (pct < 15) return 1;
+      if (pct < 30) return 2;
+      if (pct < 45) return 3;
+      return 4;
     }
 
-    const latest = data[data.length - 1];
-    const first = data[0];
-    const difficultyDelta = difficultyScore(latest, current) - difficultyScore(first, current);
+    const startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - (totalDays - 1));
+    const startDayOfWeek = startDate.getDay();
+    const offsetDays = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+    startDate.setDate(startDate.getDate() - offsetDays);
 
-    const trend =
-      difficultyDelta > 3 ? "Harder" :
-      difficultyDelta < -3 ? "Easier" :
-      "Stable";
+    const monthLabels = [];
+    let lastMonth = -1;
 
-    const sourceCount = data.reduce((sum, row) => sum + Number(row.bucketCount || 1), 0);
+    const cells = [];
+    for (let week = 0; week < weekCount + 1; week++) {
+      for (let day = 0; day < 7; day++) {
+        const d = new Date(startDate);
+        d.setDate(d.getDate() + week * 7 + day);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const count = dayCounts[key] || 0;
+        const level = getLevel(count);
+        const isFuture = d > now;
+
+        if (!isFuture && d.getMonth() !== lastMonth && day === 0) {
+          lastMonth = d.getMonth();
+          monthLabels.push({ week, label: d.toLocaleString("en", { month: "short" }) });
+        }
+
+        if (!isFuture) {
+          const dateLabel = d.toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric"
+          });
+          const title = count
+            ? `${dateLabel} · ${count} trial${count === 1 ? "" : "s"}`
+            : `${dateLabel} · no activity`;
+          cells.push(`
+            <rect class="activity-cell level-${level}" x="${labelWidth + week * (cellSize + cellGap)}" y="${day * (cellSize + cellGap)}" width="${cellSize}" height="${cellSize}" rx="2" data-count="${count}" data-date="${escapeHtml(dateLabel)}" aria-label="${escapeHtml(title)}">
+              <title>${escapeHtml(title)}</title>
+            </rect>
+          `);
+        }
+      }
+    }
+
+    const monthLabelEls = monthLabels.map((m) =>
+      `<text x="${labelWidth + m.week * (cellSize + cellGap)}" y="-4" class="activity-month">${m.label}</text>`
+    ).join("");
+
+    const dayLabels = ["Mon", "", "Wed", "", "Fri", "", ""].map((label, i) =>
+      label ? `<text x="${labelWidth - 5}" y="${i * (cellSize + cellGap) + cellSize * 0.75}" class="activity-day-label" text-anchor="end">${label}</text>` : ""
+    ).join("");
+
+    const svgWidth = labelWidth + (weekCount + 1) * (cellSize + cellGap);
+    const svgHeight = 7 * (cellSize + cellGap) - cellGap;
 
     return `
-      <div><strong>Points</strong><span>${data.length} <small>from ${sourceCount}</small></span></div>
-      <div><strong>Scope</strong><span>${escapeHtml(scope)}</span></div>
-      <div><strong>Latest avg</strong><span>${Math.round(latest.flashAfter)}ms · ${Math.round(latest.accuracy)}%</span></div>
-      <div><strong>Trend</strong><span>${trend}</span></div>
+      <div class="activity-graph-wrap">
+        <svg class="activity-svg" viewBox="0 0 ${svgWidth} ${svgHeight + 16}" preserveAspectRatio="xMinYMin meet">
+          <g transform="translate(0, 16)">
+            ${dayLabels}
+            ${monthLabelEls}
+            ${cells.join("")}
+          </g>
+        </svg>
+        <div class="activity-legend">
+          <span class="activity-legend-label">Less</span>
+          ${[0,1,2,3,4].map((l) => `<span class="activity-cell level-${l} activity-legend-cell"></span>`).join("")}
+          <span class="activity-legend-label">More</span>
+        </div>
+      </div>
     `;
   }
 
@@ -897,6 +1135,79 @@ window.UFOVProgress = (() => {
   }
 
   function drawDateAxisLabels(ctx, padding, chartWidth, chartHeight, data) {
+    if (!Array.isArray(data) || !data.length) return;
+
+    const bottom = padding.top + chartHeight;
+    const sameDayRange = data.length > 1 && data.every((row) => isSameCalendarDay(row.date, data[0].date));
+    const labelIndexes = getDateAxisLabelIndexes(data.length, chartWidth);
+
+    ctx.save();
+    ctx.font = "800 11px Inter, system-ui, sans-serif";
+    ctx.fillStyle = "#8f8f8f";
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1;
+
+    labelIndexes.forEach((index) => {
+      const row = data[index];
+      const x = data.length === 1
+        ? padding.left + chartWidth / 2
+        : padding.left + (index / (data.length - 1)) * chartWidth;
+      const tickX = crispStrokePosition(x);
+      const y = crispStrokePosition(bottom);
+
+      ctx.beginPath();
+      ctx.moveTo(tickX, y);
+      ctx.lineTo(tickX, y + 7);
+      ctx.stroke();
+
+      if (index === 0) ctx.textAlign = "left";
+      else if (index === data.length - 1) ctx.textAlign = "right";
+      else ctx.textAlign = "center";
+
+      ctx.fillText(formatChartAxisDate(row, sameDayRange), Math.round(x), Math.round(bottom + 24));
+    });
+
+    ctx.restore();
+  }
+
+  function getDateAxisLabelIndexes(length, chartWidth) {
+    if (length <= 0) return [];
+
+    const maxLabels = Math.max(2, Math.min(8, Math.floor(chartWidth / 96)));
+    if (length <= maxLabels) {
+      return Array.from({ length }, (_, index) => index);
+    }
+
+    const indexes = new Set([0, length - 1]);
+    for (let i = 1; i < maxLabels - 1; i += 1) {
+      indexes.add(Math.round((i / (maxLabels - 1)) * (length - 1)));
+    }
+
+    return Array.from(indexes).sort((a, b) => a - b);
+  }
+
+  function isSameCalendarDay(a, b) {
+    const first = new Date(a);
+    const second = new Date(b);
+
+    return first.getFullYear() === second.getFullYear()
+      && first.getMonth() === second.getMonth()
+      && first.getDate() === second.getDate();
+  }
+
+  function formatChartAxisDate(row, includeTime) {
+    const timestamp = row && row.date ? row.date : Date.now();
+    const date = new Date(timestamp);
+    const dateText = date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
+    if (!includeTime) return dateText;
+
+    const timeText = date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+
+    return `${dateText} ${timeText}`;
   }
 
   function drawHorizontalMarker(ctx, padding, chartWidth, chartHeight, value, color, label) {

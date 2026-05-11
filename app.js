@@ -811,6 +811,7 @@ function toggleTimerPanel() {
 function openTimerPanel() {
   if (!timerPanel) return;
   timerPanel.classList.remove("hidden", "closing");
+  void timerPanel.offsetHeight;
   updateTimerGoalFields();
   updateTimerUi();
   timerPanel.classList.add("open");
@@ -2770,6 +2771,7 @@ function openHotkeyPanel() {
   if (!hotkeyPanel) return;
   renderHotkeyPanel();
   hotkeyPanel.classList.remove("hidden");
+  void hotkeyPanel.offsetHeight;
 }
 
 function closeHotkeyPanel() {
@@ -2979,6 +2981,7 @@ const allSettingInputs = [
 function openSettingsPanel() {
   if (!settingsPanel) return;
   settingsPanel.classList.remove("closing");
+  void settingsPanel.offsetHeight;
   settingsPanel.classList.add("open");
 }
 

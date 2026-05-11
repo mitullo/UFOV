@@ -226,7 +226,8 @@ h1 {
 
 .primary-button:hover,
 .secondary-button:hover,
-.choice-button:hover {
+.choice-button:hover,
+.start-button:hover {
   transform: translateY(-1px);
   filter: brightness(1.1);
 }
@@ -817,7 +818,10 @@ body {
   position: fixed;
   inset: 0;
   z-index: 260;
-  display: none;
+  display: grid;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
   place-items: center;
   padding: 20px;
   background: rgba(0, 0, 0, 0.82);
@@ -825,7 +829,9 @@ body {
 }
 
 .mobile-warning.visible {
-  display: grid;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .mobile-warning-card {
@@ -1014,6 +1020,13 @@ h1 {
   background: rgba(0, 0, 0, 0.72);
 }
 
+.progress-modal.hidden {
+  display: grid !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .progress-window {
   width: min(1480px, calc(100vw - 32px));
   height: min(800px, calc(100vh - 32px));
@@ -1061,12 +1074,17 @@ h1 {
 
 .progress-body {
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 18px 20px;
 }
 
 .progress-panel {
   min-height: 100%;
+}
+
+.progress-panel[data-panel="recent"] {
+  max-height: 100%;
+  overflow: auto;
 }
 
 .progress-table {
@@ -1137,7 +1155,6 @@ h1 {
   width: 100%;
   max-width: 100%;
   height: auto;
-  cursor: crosshair;
 }
 
 .chart-tooltip {
@@ -1151,6 +1168,14 @@ h1 {
   background: rgba(6, 8, 14, 0.96);
   backdrop-filter: blur(12px);
   pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.97);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.chart-tooltip:not(.hidden) {
+  opacity: 1;
+  transform: translateY(0) scale(1);
 }
 
 .chart-tooltip strong {
@@ -1239,6 +1264,13 @@ h1 {
   opacity: 1;
 }
 
+.progress-clear[data-confirming="true"] {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  text-decoration: none;
+  opacity: 1;
+}
+
 .progress-action {
   font-weight: 900;
 }
@@ -1255,34 +1287,78 @@ h1 {
   color: #a8a29e;
 }
 
-.chart-summary {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.chart-summary div {
+.activity-graph {
   padding: 14px 16px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
+    rgba(255, 255, 255, 0.025);
+  margin-bottom: 10px;
+  overflow-x: auto;
 }
 
-.chart-summary strong,
-.chart-summary span {
-  display: block;
+.activity-graph-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.chart-summary strong {
-  margin-bottom: 4px;
-  color: #8f8f8f;
-  font-size: 0.78rem;
+.activity-svg {
+  width: 100%;
+  height: auto;
 }
 
-.chart-summary span {
-  color: #f5f5f5;
-  font-size: 1.05rem;
-  font-weight: 900;
+.activity-svg .activity-month,
+.activity-svg .activity-day-label {
+  fill: #6b7280;
+  font-size: 10px;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+.activity-cell.level-0 {
+  fill: rgba(255, 255, 255, 0.04);
+}
+
+.activity-cell.level-1 {
+  fill: rgba(65, 105, 225, 0.25);
+}
+
+.activity-cell.level-2 {
+  fill: rgba(65, 105, 225, 0.5);
+}
+
+.activity-cell.level-3 {
+  fill: rgba(65, 105, 225, 0.75);
+}
+
+.activity-cell.level-4 {
+  fill: #4169E1;
+}
+
+.activity-svg .activity-cell:hover {
+  stroke: rgba(255, 255, 255, 0.4);
+  stroke-width: 1.5;
+}
+
+.activity-legend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.activity-legend-label {
+  color: #6b7280;
+  font-size: 0.68rem;
+}
+
+.activity-legend-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  display: inline-block;
 }
 
 .icon-button {
@@ -1326,7 +1402,10 @@ h1 {
 }
 
 .start-overlay.hidden {
-  display: none;
+  display: flex !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 .start-card {
@@ -1384,6 +1463,16 @@ h1 {
   background: #4169E1;
   font-size: 1.35rem;
   font-weight: 800;
+  transition: transform 160ms var(--ui-ease), filter 160ms var(--ui-ease), background 160ms var(--ui-ease);
+}
+
+.start-button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+}
+
+.start-button:active {
+  transform: translateY(0) scale(0.985);
 }
 
 .response-overlay {
@@ -1392,7 +1481,10 @@ h1 {
   top: 50%;
   bottom: auto;
   z-index: 50;
-  display: none;
+  display: grid;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
   width: min(760px, calc(100vw - 32px));
   transform: translate(-50%, -50%);
   grid-template-columns: 1fr;
@@ -1410,7 +1502,9 @@ h1 {
 }
 
 .response-overlay.visible {
-  display: grid;
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .response-overlay.feedback-mode {
@@ -2206,7 +2300,8 @@ body::before {
   background: rgba(255, 255, 255, 0.045);
 }
 
-.progress-body {
+.progress-body,
+.progress-panel[data-panel="recent"] {
   scrollbar-color: rgba(65, 105, 225, 0.34) rgba(255, 255, 255, 0.04);
 }
 
@@ -2222,16 +2317,11 @@ body::before {
   background: rgba(255, 255, 255, 0.012);
 }
 
-.chart-summary div,
 .chart-wrap {
   border-radius: 18px;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.018)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015)),
     rgba(255, 255, 255, 0.025);
-}
-
-.chart-summary div {
-  border-color: rgba(148, 163, 184, 0.12);
 }
 
 .chart-wrap {
@@ -2283,16 +2373,6 @@ body::before {
 input,
 select {
   transition: border-color 140ms ease, background 140ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.001ms !important;
-    transition-duration: 0.001ms !important;
-  }
 }
 
 @media (max-width: 860px) {
@@ -2521,6 +2601,13 @@ textarea:focus {
   backdrop-filter: blur(14px);
 }
 
+.hotkey-panel.hidden {
+  display: grid !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 .hotkey-card {
   width: min(780px, calc(100vw - 32px));
   max-height: min(820px, calc(100vh - 32px));
@@ -2689,7 +2776,7 @@ textarea:focus {
 .progress-body {
   min-height: 0;
   padding: 12px 16px 8px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .progress-panel[data-panel="chart"]:not(.hidden) {
@@ -2698,28 +2785,6 @@ textarea:focus {
   gap: 8px;
   height: 100%;
   min-height: 0;
-}
-
-.chart-summary {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 0;
-}
-
-.chart-summary div {
-  min-height: 0;
-  padding: 8px 12px;
-  border-radius: 14px;
-}
-
-.chart-summary strong {
-  margin-bottom: 2px;
-  font-size: 0.68rem;
-}
-
-.chart-summary span {
-  font-size: 0.92rem;
-  line-height: 1.15;
 }
 
 .chart-wrap {
@@ -2779,10 +2844,6 @@ textarea:focus {
     padding: 8px 12px 6px;
   }
 
-  .chart-summary div {
-    padding: 6px 10px;
-  }
-
   .chart-wrap {
     height: min(44vh, 360px);
   }
@@ -2803,10 +2864,6 @@ textarea:focus {
 }
 
 @media (max-width: 760px) {
-  .chart-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .chart-legend {
     width: 100%;
     justify-content: center;
@@ -2823,7 +2880,7 @@ textarea:focus {
   overflow: hidden;
 }
 
-.progress-panel[data-panel="chart"] .chart-summary {
+.progress-panel[data-panel="chart"] .activity-graph {
   margin-bottom: 4px;
 }
 
@@ -2903,10 +2960,6 @@ textarea:focus {
 }
 
 @media (max-width: 980px) {
-  .chart-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .chart-passive-dates {
     flex-direction: column;
   }
@@ -2928,10 +2981,6 @@ textarea:focus {
 
   .progress-body {
     padding: 10px 14px;
-  }
-
-  .chart-summary {
-    display: none;
   }
 }
 
@@ -3045,6 +3094,7 @@ select {
 .primary-button:active,
 .secondary-button:active,
 .choice-button:active,
+.start-button:active,
 .progress-tab:active,
 .progress-close:active,
 .timer-close:active {
@@ -3215,7 +3265,7 @@ select {
 }
 
 
-.chart-summary div,
+.activity-graph,
 .chart-wrap,
 .progress-tabs,
 .chart-legend {
@@ -3493,11 +3543,6 @@ select {
   z-index: 3;
 }
 
-.chart-summary span small {
-  color: #8f98a8;
-  font-size: 0.72em;
-  font-weight: 850;
-}
 
 @media (max-height: 760px) {
   .chart-card .chart-wrap {
@@ -3955,6 +4000,7 @@ body.hold-wheel-gesture-active {
 .settings-panel {
   opacity: 0;
   transform: translateX(100%) scale(0.985);
+  pointer-events: none;
   transition:
     transform 220ms var(--ui-ease, ease),
     opacity 180ms var(--ui-ease, ease);
@@ -3963,6 +4009,7 @@ body.hold-wheel-gesture-active {
 .settings-panel.open {
   opacity: 1;
   transform: translateX(0) scale(1);
+  pointer-events: auto;
   animation: none;
 }
 
@@ -3972,6 +4019,13 @@ body.hold-wheel-gesture-active {
 
 .timer-panel {
   will-change: transform, opacity;
+}
+
+.timer-panel.hidden {
+  display: grid !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }
 
 .timer-panel.closing {
@@ -4045,14 +4099,128 @@ body.hold-wheel-gesture-active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .settings-panel,
-  .timer-panel,
-  .progress-modal,
-  .progress-window,
-  .hotkey-panel,
-  .hotkey-card,
-  .hold-wheel-popover {
-    transition-duration: 0.001ms !important;
+  .noise-mask.visible {
     animation-duration: 0.001ms !important;
   }
+}
+
+/* Progress chart: compact activity strip, keep the main chart large. */
+.progress-panel[data-panel="chart"]:not(.hidden) {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.progress-panel[data-panel="chart"] .activity-graph {
+  justify-self: center;
+  width: min(720px, 100%);
+  max-height: 124px;
+  margin: 0 auto 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.progress-panel[data-panel="chart"] .activity-graph-wrap {
+  align-items: center;
+  gap: 4px;
+  min-width: max-content;
+}
+
+.progress-panel[data-panel="chart"] .activity-svg {
+  flex: 0 0 auto;
+  width: clamp(640px, 52vw, 720px);
+  max-width: none;
+  height: auto;
+}
+
+.progress-panel[data-panel="chart"] .activity-svg .activity-month,
+.progress-panel[data-panel="chart"] .activity-svg .activity-day-label {
+  font-size: 9px;
+}
+
+.progress-panel[data-panel="chart"] .activity-legend {
+  justify-content: center;
+  gap: 3px;
+  margin: 0;
+  font-size: 10px;
+}
+
+.progress-panel[data-panel="chart"] .activity-legend-cell {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.progress-panel[data-panel="chart"] .chart-card {
+  min-height: 0;
+}
+
+.progress-panel[data-panel="chart"] .chart-card .chart-wrap {
+  min-height: 310px;
+  max-height: calc(100vh - 210px);
+}
+
+@media (max-height: 760px) {
+  .progress-panel[data-panel="chart"] .activity-graph {
+    max-height: 108px;
+  }
+
+  .progress-panel[data-panel="chart"] .chart-card .chart-wrap {
+    min-height: 250px;
+    max-height: calc(100vh - 190px);
+  }
+}
+
+@media (max-width: 760px) {
+  .progress-panel[data-panel="chart"] .activity-graph {
+    width: 100%;
+  }
+
+  .progress-panel[data-panel="chart"] .activity-svg {
+    width: 640px;
+  }
+}
+
+/* Progress follow-up: visible heatmap legend, stable hover tooltip, SVG date titles. */
+.chart-wrap {
+  position: relative;
+}
+
+.chart-tooltip {
+  left: 0;
+  top: 0;
+}
+
+.activity-legend-cell.level-0 {
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.activity-legend-cell.level-1 {
+  background: rgba(65, 105, 225, 0.25);
+}
+
+.activity-legend-cell.level-2 {
+  background: rgba(65, 105, 225, 0.5);
+}
+
+.activity-legend-cell.level-3 {
+  background: rgba(65, 105, 225, 0.75);
+}
+
+.activity-legend-cell.level-4 {
+  background: #4169E1;
+}
+
+.progress-panel[data-panel="chart"] .activity-legend-label {
+  color: #d6d3d1;
+  line-height: 10px;
 }
