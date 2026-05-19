@@ -126,7 +126,7 @@
             <div><span>Refresh</span><strong id="refreshStat">--Hz</strong></div>
           </div>
           <div class="drawer-actions">
-            <button class="primary-button" id="calibrateButton">Calibrate</button>
+            <button class="primary-button" id="calibrateButton">Calibrate Hz</button>
             <button class="secondary-button" id="resetButton">Reset</button>
           </div>
         </div>
@@ -198,8 +198,17 @@
           </label>
 
           <label>
-            Minimum flash ms
-            <input type="number" id="minDurationInput" min="16" max="100" value="16" step="1" />
+            Minimum flash rate
+            <select id="refreshRateSelect">
+              <option value="60" selected>60Hz · 16.7ms</option>
+              <option value="75">75Hz · 13.3ms</option>
+              <option value="120">120Hz · 8.3ms</option>
+              <option value="144">144Hz · 6.9ms</option>
+              <option value="165">165Hz · 6.1ms</option>
+              <option value="240">240Hz · 4.2ms</option>
+              <option value="360">360Hz · 2.8ms</option>
+            </select>
+            <input type="hidden" id="minDurationInput" value="16.67" />
           </label>
 
           <label>
@@ -245,6 +254,14 @@
           <label>
             Distractor symbol
             <input type="text" id="distractorSymbolInput" value="Y" maxlength="4" />
+          </label>
+
+          <label>
+            Symbol mode
+            <select id="symbolModeSelect">
+              <option value="fixed" selected>Fixed symbols</option>
+              <option value="novelEachTrial">Novel each trial</option>
+            </select>
           </label>
 
           <label class="toggle-row">

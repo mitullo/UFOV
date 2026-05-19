@@ -42,6 +42,7 @@ const targetAccuracyInput = document.getElementById("targetAccuracyInput");
 const regressAccuracyInput = document.getElementById("regressAccuracyInput");
 const startDurationInput = document.getElementById("startDurationInput");
 const minDurationInput = document.getElementById("minDurationInput");
+const refreshRateSelect = document.getElementById("refreshRateSelect");
 const maxDurationInput = document.getElementById("maxDurationInput");
 const fixationInput = document.getElementById("fixationInput");
 const maskInput = document.getElementById("maskInput");
@@ -51,6 +52,7 @@ const correctDelayInput = document.getElementById("correctDelayInput");
 const missDelayInput = document.getElementById("missDelayInput");
 const targetSymbolInput = document.getElementById("targetSymbolInput");
 const distractorSymbolInput = document.getElementById("distractorSymbolInput");
+const symbolModeSelect = document.getElementById("symbolModeSelect");
 const blurLettersInput = document.getElementById("blurLettersInput");
 const letterBlurInput = document.getElementById("letterBlurInput");
 const hotkeysInput = document.getElementById("hotkeysInput");
@@ -109,7 +111,11 @@ const DEFAULT_SPLIT_KEYBOARD_DIRECTION_HOTKEYS = "E=D; NE=E; N=W; NW=Q; W=A; SW=
 const DEFAULT_DIRECTION_HOTKEYS = "E=D; NE=E; N=W; NW=Q; W=A; SW=Z; S=S; SE=C";
 const DEFAULT_PAUSE_HOTKEY = "Space";
 const DEFAULT_SKIP_HOTKEY = "Backspace";
-const MIN_FLASH_DURATION_MS = 16;
+const MIN_FLASH_DURATION_MS = 1000 / 360;
+const DEFAULT_REFRESH_RATE_HZ = 60;
+const DEFAULT_TARGET_SYMBOL = "✕";
+const DEFAULT_DISTRACTOR_SYMBOL = "Y";
+const NOVEL_SYMBOL_POOL = ["✕", "Y", "X", "V", "P", "T", "L", "F", "E", "H", "K", "N", "Z", "U", "Q", "R"];
 const DIRECTION_HOTKEY_LABELS = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
 const FLASH_ADVANCE_MULTIPLIER = 0.8;
 const FLASH_REGRESS_MULTIPLIER = 1 / FLASH_ADVANCE_MULTIPLIER;
@@ -143,7 +149,7 @@ function createInitialState() {
     levelTrial: 0,
     duration: loadSavedFlashDuration(settings),
     frameMs: 16.67,
-    hardwareMinDuration: MIN_FLASH_DURATION_MS,
+    hardwareMinDuration: refreshHzToDurationMs(DEFAULT_REFRESH_RATE_HZ),
     correct: 0,
     total: 0,
     streak: 0,
@@ -202,8 +208,9 @@ function createHoldWheelResponseState() {
 }
 
 function getSettings() {
-  const minimum = readNumber(minDurationInput, MIN_FLASH_DURATION_MS, MIN_FLASH_DURATION_MS, 100);
-  const maximum = Math.max(readNumber(maxDurationInput, 500, 50, 1500), minimum);
+  const refreshRateHz = readRefreshRateHz();
+  const minimum = refreshHzToDurationMs(refreshRateHz);
+  const maximum = Math.max(readNumber(maxDurationInput, 500, 10, 1500), minimum);
   const directionCount = readNumber(directionCountInput, 8, 4, 16);
   const targetLimit = Math.min(8, directionCount);
   return {
@@ -217,6 +224,7 @@ function getSettings() {
     regressAccuracy: readNumber(regressAccuracyInput, 50, 10, 80) / 100,
     startDuration: clamp(readNumber(startDurationInput, 500, MIN_FLASH_DURATION_MS, 1000), minimum, maximum),
     minDuration: minimum,
+    minRefreshHz: refreshRateHz,
     maxDuration: maximum,
     fixationMs: readNumber(fixationInput, 800, 0, 1500),
     maskMs: readNumber(maskInput, 90, 0, 500),
@@ -227,8 +235,9 @@ function getSettings() {
     peripheralRange: readNumber(rangeSlider, 78, 36, 98),
     peripheralTargets: readNumber(peripheralTargetInput, 1, 1, targetLimit),
     distractors: readNumber(distractorInput, 18, 0, 47),
-    targetSymbol: readSymbol(targetSymbolInput, "✕"),
-    distractorSymbol: readSymbol(distractorSymbolInput, "Y"),
+    targetSymbol: readSymbol(targetSymbolInput, DEFAULT_TARGET_SYMBOL),
+    distractorSymbol: readSymbol(distractorSymbolInput, DEFAULT_DISTRACTOR_SYMBOL),
+    symbolMode: symbolModeSelect ? symbolModeSelect.value : "fixed",
     blurLetters: blurLettersInput ? blurLettersInput.checked : false,
     letterBlur: readNumber(letterBlurInput, 2.5, 0, 12),
     hotkeys: hotkeysInput ? hotkeysInput.checked : true,
@@ -383,6 +392,59 @@ function readNumber(input, fallback, min, max) {
   return clamp(value, min, max);
 }
 
+function readRefreshRateHz() {
+  const value = refreshRateSelect ? Number(refreshRateSelect.value) : DEFAULT_REFRESH_RATE_HZ;
+  return Number.isFinite(value) ? clamp(value, 30, 360) : DEFAULT_REFRESH_RATE_HZ;
+}
+
+function refreshHzToDurationMs(hz) {
+  const safeHz = Number.isFinite(Number(hz)) && Number(hz) > 0 ? Number(hz) : DEFAULT_REFRESH_RATE_HZ;
+  return 1000 / safeHz;
+}
+
+function formatFlashDuration(ms) {
+  const value = Number(ms);
+  const safeMs = Number.isFinite(value) && value > 0 ? value : refreshHzToDurationMs(DEFAULT_REFRESH_RATE_HZ);
+  const hz = Math.round(1000 / safeMs);
+  const prettyMs = safeMs < 10 ? safeMs.toFixed(1) : String(Math.round(safeMs));
+  return `${hz}Hz (${prettyMs}ms)`;
+}
+
+function setRefreshRateSelectToNearest(hz) {
+  if (!refreshRateSelect) return;
+  const options = Array.from(refreshRateSelect.options)
+    .map((option) => Number(option.value))
+    .filter(Number.isFinite);
+  if (!options.length) return;
+  const nearest = options.reduce((best, option) => {
+    return Math.abs(option - hz) < Math.abs(best - hz) ? option : best;
+  }, options[0]);
+  refreshRateSelect.value = String(nearest);
+}
+
+function getTrialSymbols() {
+  const settings = getSettings();
+  if (settings.symbolMode !== "novelEachTrial") {
+    return {
+      targetSymbol: settings.targetSymbol,
+      distractorSymbol: settings.distractorSymbol
+    };
+  }
+
+  const pool = shuffle(NOVEL_SYMBOL_POOL).filter(Boolean);
+  const targetSymbol = pool[0] || settings.targetSymbol;
+  const distractorSymbol = pool.find((symbol) => symbol !== targetSymbol) || settings.distractorSymbol;
+  return { targetSymbol, distractorSymbol };
+}
+
+function getCurrentTargetSymbol() {
+  return state.current && state.current.targetSymbol ? state.current.targetSymbol : getSettings().targetSymbol;
+}
+
+function getCurrentDistractorSymbol() {
+  return state.current && state.current.distractorSymbol ? state.current.distractorSymbol : getSettings().distractorSymbol;
+}
+
 function randomItem(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
@@ -401,7 +463,7 @@ function loadSavedFlashDuration(settings) {
     if (raw === null) return settings.startDuration;
     const saved = Number(raw);
     if (!Number.isFinite(saved) || saved <= 0) return settings.startDuration;
-    return clamp(saved, Math.max(settings.minDuration, MIN_FLASH_DURATION_MS), settings.maxDuration);
+    return clamp(saved, settings.minDuration, settings.maxDuration);
   } catch (_) {
     return settings.startDuration;
   }
@@ -615,11 +677,15 @@ last = now;
 samples.sort((a, b) => a - b);
 const trimmed = samples.slice(8, -8);
 const average = trimmed.reduce((sum, value) => sum + value, 0) / trimmed.length || 16.67;
+const measuredHz = Math.round(1000 / average);
 state.frameMs = average;
-state.hardwareMinDuration = Math.max(MIN_FLASH_DURATION_MS, Math.min(average, 16.67));
-state.duration = clamp(state.duration, getEffectiveMinDuration(), getSettings().maxDuration);
+setRefreshRateSelectToNearest(measuredHz);
+const settings = getSettings();
+state.hardwareMinDuration = settings.minDuration;
+state.duration = clamp(state.duration, settings.minDuration, settings.maxDuration);
+saveSettings();
 saveFlashDuration();
-feedbackText.textContent = `Display calibrated: ${Math.round(1000 / average)}Hz`;
+feedbackText.textContent = `Display calibrated: ${measuredHz}Hz · minimum flash ${formatFlashDuration(settings.minDuration)}`;
 updateStats();
 }
 
@@ -1246,7 +1312,8 @@ function createTrial() {
     const direction = randomItem(available.length ? available : allDirections);
     usedDirections.push(direction);
   }
-  return { center, decoy, direction: usedDirections[0], directions: usedDirections };
+  const symbols = getTrialSymbols();
+  return { center, decoy, direction: usedDirections[0], directions: usedDirections, ...symbols };
 }
 
 async function flashStimuli(trial, duration, token) {
@@ -1325,7 +1392,7 @@ function hideMask() {
 function buildSymbolMask() {
   const settings = getSettings();
   const count = settings.maskDensity;
-  const symbols = [settings.targetSymbol, settings.distractorSymbol];
+  const symbols = [getCurrentTargetSymbol(), getCurrentDistractorSymbol()];
   for (let i = 0; i < count; i += 1) {
     const symbol = document.createElement("span");
     symbol.className = "mask-symbol";
@@ -1363,7 +1430,7 @@ function createPeripheralTarget(direction, fragment = stage) {
   const settings = getSettings();
   const element = document.createElement("div");
   element.className = "peripheral-target";
-  element.textContent = settings.targetSymbol;
+  element.textContent = getCurrentTargetSymbol();
   const jitter = settings.stimulusArea === "full" ? 0.22 + Math.random() * 0.78 : 0.3 + Math.random() * 0.7;
   const radius = settings.peripheralRange * jitter;
   const position = positionFromDirection(direction.angle, radius);
@@ -1418,7 +1485,7 @@ function polarDistance(angleA, radiusA, angleB, radiusB) {
 function addDecoy(angle, radius, fragment = stage) {
   const element = document.createElement("div");
   element.className = "decoy";
-  element.textContent = getSettings().distractorSymbol;
+  element.textContent = getCurrentDistractorSymbol();
   const position = positionFromDirection(angle, radius);
   element.style.left = position.x;
   element.style.top = position.y;
@@ -1992,17 +2059,22 @@ function updateHoldWheelFromPointer(clientX, clientY) {
   const direction = holdWheelDirectionFromPoint(clientX, clientY);
   holdWheelResponse.hoverDirection = direction;
 
-  if (direction) {
-    if (holdWheelResponse.requiredDirections > 1) {
-      const alreadySelected = holdWheelResponse.selectedDirections.some((selected) => selected.index === direction.index);
-      if (!alreadySelected && holdWheelResponse.selectedDirections.length < holdWheelResponse.requiredDirections) {
-        holdWheelResponse.selectedDirections.push(direction);
-      }
-    } else {
-      holdWheelResponse.selectedDirections = [direction];
-    }
-    state.response.peripherals = holdWheelResponse.selectedDirections.slice(0, holdWheelResponse.requiredDirections);
+  if (!direction) {
+    holdWheelResponse.selectedDirections = [];
+    state.response.peripherals = [];
+    updateHoldWheelVisualState();
+    return;
   }
+
+  if (holdWheelResponse.requiredDirections > 1) {
+    const alreadySelected = holdWheelResponse.selectedDirections.some((selected) => selected.index === direction.index);
+    if (!alreadySelected && holdWheelResponse.selectedDirections.length < holdWheelResponse.requiredDirections) {
+      holdWheelResponse.selectedDirections.push(direction);
+    }
+  } else {
+    holdWheelResponse.selectedDirections = [direction];
+  }
+  state.response.peripherals = holdWheelResponse.selectedDirections.slice(0, holdWheelResponse.requiredDirections);
 
   updateHoldWheelVisualState();
 }
@@ -2032,6 +2104,17 @@ function finalizeHoldWheelGesture() {
   const required = holdWheelResponse.requiredDirections;
 
   cleanupHoldWheelGesture(false);
+
+  if (selectedCount === 0) {
+    holdWheelResponse.selectedCenter = null;
+    state.response.center = null;
+    state.response.peripherals = [];
+    promptText.textContent = "Emoji deselected.";
+    feedbackText.className = "";
+    feedbackText.textContent = "Hold either emoji again, then drag outside the center circle to choose a slice.";
+    updateHoldWheelVisualState();
+    return;
+  }
 
   if (selectedCount >= required && required > 0) {
     state.response.peripherals = holdWheelResponse.selectedDirections.slice(0, required);
@@ -2165,7 +2248,8 @@ function presentPeripheralChooser() {
   stage.classList.add("selecting-location");
   const settings = getSettings();
   const count = getRequiredPeripheralCount();
-  promptText.textContent = count === 1 ? `Where was the ${settings.targetSymbol}?` : `Select all ${count} targets.`;
+    const targetSymbol = getCurrentTargetSymbol();
+  promptText.textContent = count === 1 ? `Where was the ${targetSymbol}?` : `Select all ${count} ${targetSymbol} targets.`;
   promptText.className = "";
   feedbackText.textContent = count === 1 ? "Click a slice or use direction hotkeys." : `0/${count} selected`;
   responseOverlay.classList.add("visible");
@@ -2401,7 +2485,7 @@ function resetProgressWindow() {
 }
 
 function getEffectiveMinDuration() {
-  return Math.max(MIN_FLASH_DURATION_MS, getSettings().minDuration);
+  return getSettings().minDuration;
 }
 
 function applyProgressionIfNeeded() {
@@ -2426,10 +2510,10 @@ function applyProgressionIfNeeded() {
       state.duration = newDuration;
       action = "harder";
       feedbackText.className = "success";
-      feedbackText.textContent = `Harder: ${Math.round(state.duration)}ms`;
+      feedbackText.textContent = `Harder: ${formatFlashDuration(state.duration)}`;
     } else {
       feedbackText.className = "";
-      feedbackText.textContent = `No change: ${flashBefore}ms (at limit)`;
+      feedbackText.textContent = `No change: ${formatFlashDuration(state.duration)} (at limit)`;
     }
   } else if (wrongCount >= requiredWrong) {
     const newDuration = clamp(state.duration * FLASH_REGRESS_MULTIPLIER, minimum, maximum);
@@ -2437,10 +2521,10 @@ function applyProgressionIfNeeded() {
       state.duration = newDuration;
       action = "easier";
       feedbackText.className = "fail";
-      feedbackText.textContent = `Easier: ${Math.round(state.duration)}ms`;
+      feedbackText.textContent = `Easier: ${formatFlashDuration(state.duration)}`;
     } else {
       feedbackText.className = "";
-      feedbackText.textContent = `No change: ${flashBefore}ms (at limit)`;
+      feedbackText.textContent = `No change: ${formatFlashDuration(state.duration)} (at limit)`;
     }
   } else {
     feedbackText.className = "";
@@ -2481,7 +2565,7 @@ function applyProgressionIfNeeded() {
 
 function updateStats() {
   if (levelTitle) levelTitle.textContent = levelNames[state.level - 1];
-  durationStat.textContent = `${Math.round(state.duration)}ms`;
+  durationStat.textContent = formatFlashDuration(state.duration);
   trialStat.textContent = String(state.trial);
   accuracyStat.textContent = state.total ? `${Math.round((state.correct / state.total) * 100)}%` : "0%";
   refreshStat.textContent = state.frameMs ? `${Math.round(1000 / state.frameMs)}Hz` : "--Hz";
@@ -2663,14 +2747,14 @@ function loadSettings() {
 }
 
 function enforceMinimumFlashSettings() {
-  [minDurationInput, startDurationInput].forEach((input) => {
-    if (!input) return;
-    input.min = String(MIN_FLASH_DURATION_MS);
-    const value = Number(input.value);
-    if (!Number.isFinite(value) || value < MIN_FLASH_DURATION_MS) {
-      input.value = String(MIN_FLASH_DURATION_MS);
+  const settings = getSettings();
+  if (startDurationInput) {
+    startDurationInput.min = String(Math.floor(MIN_FLASH_DURATION_MS));
+    const value = Number(startDurationInput.value);
+    if (!Number.isFinite(value) || value < settings.minDuration) {
+      startDurationInput.value = String(Math.ceil(settings.minDuration));
     }
-  });
+  }
 }
 
 function migrateSplitKeyboardSettings() {
@@ -2695,7 +2779,7 @@ function applySettingExplainers() {
     targetAccuracyInput: "Accuracy needed to make the flash faster.",
     regressAccuracyInput: "Accuracy floor that makes the flash slower when performance drops.",
     startDurationInput: "Flash duration used at the start or after resetting saved duration.",
-    minDurationInput: "Fastest flash duration the app can use.",
+    refreshRateSelect: "Fastest flash option, expressed as monitor Hz. 144Hz means about 6.9ms / one 144Hz frame.",
     maxDurationInput: "Slowest flash duration the app can use.",
     fixationInput: "How long the center fixation cross appears before stimuli flash.",
     maskInput: "How long the post-flash mask stays visible.",
@@ -2705,6 +2789,7 @@ function applySettingExplainers() {
     missDelayInput: "Delay after a miss before the next trial.",
     targetSymbolInput: "The target symbol the player must find, for example X, V, P, or ✕.",
     distractorSymbolInput: "The non-target symbol used as noise, for example Y, U, or Q.",
+    symbolModeSelect: "Fixed keeps your typed symbols. Novel each trial randomizes the target and distractor letters every round.",
     blurLettersInput: "Blurs target and distractor symbols to make letter discrimination harder.",
     letterBlurInput: "Strength of the symbol blur in pixels.",
     hotkeysInput: "Enables keyboard shortcuts and the visible hotkey badges.",
@@ -2746,7 +2831,7 @@ function updateRangeSliderValue() {
 function applyInputSteps() {
   const steps = {
     startDurationInput: "1",
-    minDurationInput: "1",
+    refreshRateSelect: "1",
     maxDurationInput: "10",
     fixationInput: "50",
     maskInput: "10",
@@ -2950,7 +3035,7 @@ const allSettingInputs = [
   targetAccuracyInput,
   regressAccuracyInput,
   startDurationInput,
-  minDurationInput,
+  refreshRateSelect,
   maxDurationInput,
   fixationInput,
   maskInput,
@@ -2960,6 +3045,7 @@ const allSettingInputs = [
   missDelayInput,
   targetSymbolInput,
   distractorSymbolInput,
+  symbolModeSelect,
   blurLettersInput,
   letterBlurInput,
   hotkeysInput,
@@ -3030,12 +3116,13 @@ levelSelect.addEventListener("change", () => {
   updateStats();
   scheduleTrial(140, sessionToken);
 });
-[startDurationInput, minDurationInput, maxDurationInput].forEach((input) => {
+[startDurationInput, refreshRateSelect, maxDurationInput].filter(Boolean).forEach((input) => {
   input.addEventListener("change", () => {
     enforceMinimumFlashSettings();
     const settings = getSettings();
     if (input === startDurationInput) state.duration = settings.startDuration;
     else state.duration = clamp(state.duration, getEffectiveMinDuration(), settings.maxDuration);
+    state.hardwareMinDuration = settings.minDuration;
     saveFlashDuration();
     updateStats();
   });
@@ -3078,7 +3165,7 @@ resetSettingsButton.addEventListener("click", () => {
     targetAccuracyInput: "75",
     regressAccuracyInput: "50",
     startDurationInput: "500",
-    minDurationInput: "16",
+    refreshRateSelect: String(DEFAULT_REFRESH_RATE_HZ),
     maxDurationInput: "500",
     fixationInput: "600",
     maskInput: "90",
@@ -3086,8 +3173,9 @@ resetSettingsButton.addEventListener("click", () => {
     maskDensityInput: "140",
     correctDelayInput: "650",
     missDelayInput: "650",
-    targetSymbolInput: "✕",
-    distractorSymbolInput: "Y",
+    targetSymbolInput: DEFAULT_TARGET_SYMBOL,
+    distractorSymbolInput: DEFAULT_DISTRACTOR_SYMBOL,
+    symbolModeSelect: "fixed",
     blurLettersInput: false,
     letterBlurInput: "2.5",
     hotkeysInput: true,
